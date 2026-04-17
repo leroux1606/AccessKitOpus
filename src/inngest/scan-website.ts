@@ -38,7 +38,7 @@ export const scanWebsiteJob = inngest.createFunction(
     // Step 2: Run the full scan (crawl + axe-core)
     const result = await step.run("run-scan", async () => {
       try {
-        return await runScan(websiteUrl, pageLimit, standards);
+        return await runScan(websiteUrl, pageLimit, standards, { scanId });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await db.scan.update({
@@ -96,6 +96,7 @@ export const scanWebsiteJob = inngest.createFunction(
               score: pageResult.score,
               violationCount: pageResult.violations.length,
               loadTime: pageResult.loadTime,
+              screenshotUrl: pageResult.screenshotUrl ?? null,
             },
           });
 

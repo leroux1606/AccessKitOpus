@@ -26,6 +26,13 @@ export type PageScanResult = {
   loadTime: number;
   violations: ScanViolation[];
   score: number;
+  /**
+   * Public URL of the page screenshot uploaded to Cloudflare R2, or
+   * `null` / `undefined` when screenshots are disabled (no R2 config,
+   * opt-out flag set) or the upload failed. Never blocks a scan —
+   * treated as a best-effort enhancement for reports.
+   */
+  screenshotUrl?: string | null;
 };
 
 export type ScanResult = {

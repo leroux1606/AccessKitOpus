@@ -117,8 +117,30 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 - [x] **I1.** `generateAiFixSuggestion` wired into the scan pipeline
   *Added a `generate-ai-fixes` Inngest step that runs after `save-results`. For orgs on a plan with `hasAiFixes` (Agency+), it selects up to 15 CRITICAL/SERIOUS violations per scan and generates Anthropic fix suggestions with a concurrency cap of 3 to respect rate limits. Skips silently when `ANTHROPIC_API_KEY` is unset, when plan doesn't include AI fixes, or when a violation already has a cached suggestion. The existing lazy per-view generation in the issue detail page still functions as a fallback.*
-- [ ] **I2.** Cloudflare R2 screenshot storage — currently a stub
-  *`src/scanner/screenshot.ts` returns `null` until `@aws-sdk/client-s3` is installed (requires user sign-off per the `Don't install packages unless asked` rule). Needs: R2 bucket env vars, presigned upload flow, and a `screenshotUrl` column on `Page`.*
+- [x] **I2.** Cloudflare R2 screenshot storage — shipped
+
+  *Installed `@aws-sdk/client-s3@^3.1032.0` (approved by user) and replaced the `captureScreenshot` stub with a production `uploadScreenshot` / `buildScreenshotKey` / `screenshotsEnabled` trio in `src/scanner/screenshot.ts`. R2 is an S3-compatible endpoint (`https://<accountId>.r2.cloudflarestorage.com`, `region: "auto"`) so no R2-specific SDK is needed — we use `PutObjectCommand` directly per Cloudflare's current docs.*
+
+  *Design contract.* Four guarantees the implementation enforces:
+    1. **Scans can't fail on screenshot errors.** Every upload path returns `null` instead of throwing — missing env, size-cap breach, SDK rejection, network 4xx/5xx all degrade to a null `screenshotUrl`.
+    2. **Env-gated by default.** Uploads are skipped unless all five vars are set: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, and `R2_PUBLIC_URL`. Missing any → Playwright screenshot call is never even made (see `screenshotsEnabled()` gate in `axe-scanner.ts`), so there's no wasted CPU on local dev.
+    3. **Size-capped at 5 MB.** Viewport PNGs are ~100–500 KB typically; the cap only trips on anomalies. `fullPage: false` in the Playwright call keeps buffers small.
+    4. **Opt-out for staging.** `SCANNER_CAPTURE_SCREENSHOTS=false` disables the feature even with R2 configured — useful to save cost on environments where reports don't need visuals.
+
+  *Schema.* `Page.screenshotUrl` and `Violation.screenshotUrl` columns already existed in `prisma/schema.prisma` (from an earlier phase). No migration needed — wired straight into the save-results Inngest step.
+
+  *Wiring.* `scanPageWithAxe` now accepts an optional `scanId`, captures a viewport PNG after axe finishes (reusing the already-hydrated page — no second navigation), uploads under key `scans/{scanId}/{hostname-path-slug}-{timestamp}.png`, and returns the public URL on `PageScanResult.screenshotUrl`. `runScan` gained a `{ scanId }` options param threaded through from the Inngest job. The `demo-scan` public route omits `scanId` so it simply skips uploads (desired — demo scans shouldn't land screenshots in the customer R2 bucket).
+
+  *Tests.* `tests/unit/scanner/screenshot.test.ts` — 15 new cases mocking `@aws-sdk/client-s3` at the module boundary: env-gating (partial + empty env), size cap (0 and >5 MB), happy path (asserts bucket/key/content-type/cache-control match + returns the correct public URL), trailing-slash normalization on `R2_PUBLIC_URL`, SDK rejection → null, key builder slug/timestamp/URL-fallback/length-cap invariants, and the opt-out flag's exact-match behaviour.
+
+  *Docker.* No `Dockerfile` / `fly.toml` change needed — the scanner worker copies full `node_modules` from its deps stage, so `@aws-sdk/client-s3` is automatically included in the Fly.io image.
+
+  *Deploy checklist (no code — requires Cloudflare account).*
+    1. Create an R2 bucket (e.g. `accesskit-screenshots`) in the Cloudflare dashboard.
+    2. Create an R2 API token with Read+Write access to that bucket; copy the Access Key ID + Secret.
+    3. Either bind a custom domain to the bucket (e.g. `https://screenshots.accesskit.app`) or enable the public `r2.dev` subdomain — that URL becomes `R2_PUBLIC_URL`.
+    4. `fly secrets set R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… R2_BUCKET_NAME=accesskit-screenshots R2_PUBLIC_URL=…` on the scanner app.
+    5. Redeploy the worker. Next scan will populate `screenshotUrl` on every `Page` row.
 - [ ] **I3.** CI/CD integrations (GitHub Action, CLI) — REST API already works, branded artifacts still pending
   *`POST /api/v1/scans` is implemented and authenticated via Bearer API keys, so any CI system can invoke it today. What's still missing is (a) an official GitHub Action repo that wraps the curl call, (b) a branded CLI binary, (c) a sample `.github/workflows/accessibility.yml`. Those live in separate repos.*
 
@@ -161,22 +183,23 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 **Next up (all remaining items need user input or new scope):**
 
-1. ▶ **I2 — R2 screenshot upload** (needs user approval to install `@aws-sdk/client-s3` per the "Don't install packages unless asked" rule, plus R2 bucket env vars and a `screenshotUrl` migration on `Page`).
-2. ▶ **I3 — CI/CD integrations** (GitHub Action repo + branded CLI + sample workflow — separate-repo work).
-3. ▶ **Phase K — scanning accuracy audit** (WCAG 2.2 rule coverage, fingerprint stability, false-positive triage).
-4. ▶ **Phase L — integration & E2E tests** (auth routes, multi-org switching, scanner fixture, Playwright UI flows).
-5. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
+1. ▶ **I3 — CI/CD integrations** (GitHub Action repo + branded CLI + sample workflow — separate-repo work).
+2. ▶ **Phase K — scanning accuracy audit** (WCAG 2.2 rule coverage, fingerprint stability, false-positive triage).
+3. ▶ **Phase L — integration & E2E tests** (auth routes, multi-org switching, scanner fixture, Playwright UI flows).
+4. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
 
-**H1 deploy follow-up (no code — requires Fly account):** `fly launch` → `fly secrets set` → `fly deploy`, then unset `RUN_SCANS_IN_NEXT` on the web tier. Runbook: `worker/README.md`.
+**Deploy follow-ups (no code — require external accounts):**
+- **H1 (Fly.io):** `fly launch` → `fly secrets set` → `fly deploy`, then unset `RUN_SCANS_IN_NEXT` on the web tier. Runbook: `worker/README.md`.
+- **I2 (Cloudflare R2):** create bucket + API token + public-bound domain, then `fly secrets set R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… R2_BUCKET_NAME=… R2_PUBLIC_URL=…` on the scanner app. Full checklist under § I2 above.
 
 When resuming:
 1. Read this file top-to-bottom to recover context.
 2. Jump to the first `[ ]` item that doesn't require external sign-off.
 3. After shipping each item: update its checkbox, run `pnpm type-check && pnpm lint && pnpm test`, and pause for user sign-off before starting the next.
 
-**Current verification status (post-H1):** `pnpm type-check` ✅ · `pnpm lint` ✅ · `pnpm test` ✅ (190/190 pass)
+**Current verification status (post-I2):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — unrelated to I2, reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (205/205 pass — +15 new `screenshot.test.ts` cases)
 
 **How the phases are ordered:**
 G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J/K (quality) → L (tests) → M (competitive features).
 
-With Phases G, H, and J now fully green, every code-only P0/P1 item from the original audit is shipped. Everything left is either a stubbed feature that needs external sign-off (I2/I3), broader test authoring, or new product work.
+With Phases G, H, I1+I2, and J now fully green, every code-only P0/P1 item from the original audit is shipped. Everything left is either a separate-repo feature (I3), broader test authoring, or new product work.

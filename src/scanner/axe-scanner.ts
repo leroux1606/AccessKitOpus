@@ -23,12 +23,18 @@ import {
 import { generateFixSuggestion, estimateEffort } from "./fix-generator";
 import { generateFingerprint } from "./deduplicator";
 import { applyPageResourceCap } from "./page-limits";
+import {
+  buildScreenshotKey,
+  screenshotsEnabled,
+  uploadScreenshot,
+} from "./screenshot";
 
 export async function scanPageWithAxe(
   browser: Browser,
   url: string,
   websiteOrigin: string,
   standards: string[],
+  scanId?: string,
 ): Promise<PageScanResult> {
   const page = await browser.newPage();
   const startTime = Date.now();
@@ -83,7 +89,30 @@ export async function scanPageWithAxe(
       }
     }
 
-    return { url, title, loadTime, violations, score: 0 };
+    // Capture + upload a viewport screenshot after axe finishes so the
+    // page is already fully hydrated. Viewport (not fullPage) keeps the
+    // buffer <500 KB typically and the Playwright call <1 s. Upload runs
+    // in parallel-friendly fashion — all errors are swallowed by
+    // `uploadScreenshot`, so the scan proceeds with a null URL on failure.
+    // `scanId` is optional (demo-scan and other ad-hoc callers omit it)
+    // in which case screenshots are skipped entirely.
+    let screenshotUrl: string | null = null;
+    if (scanId && screenshotsEnabled()) {
+      try {
+        const buffer = await page.screenshot({ type: "png", fullPage: false });
+        screenshotUrl = await uploadScreenshot(
+          buffer,
+          buildScreenshotKey(scanId, url),
+        );
+      } catch (err) {
+        console.warn(
+          `[axe-scanner] screenshot capture failed for ${url}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    return { url, title, loadTime, violations, score: 0, screenshotUrl };
   } finally {
     await cap.dispose();
     await page.close();

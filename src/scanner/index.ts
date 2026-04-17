@@ -6,13 +6,27 @@ import { scanPageWithPa11y } from "./pa11y-scanner";
 import { addPageScores, calculateScore } from "./scorer";
 import { assertSafeFetchUrl } from "@/lib/ssrf-guard";
 
+/**
+ * Optional runtime context for a scan.
+ *
+ * `scanId` is threaded through to the axe scanner so each uploaded
+ * screenshot can be namespaced under its scan's R2 prefix
+ * (`scans/{scanId}/…`). Ad-hoc callers like the public `demo-scan`
+ * route omit it — those scans simply don't produce screenshots.
+ */
+export interface RunScanOptions {
+  scanId?: string;
+}
+
 export async function runScan(
   websiteUrl: string,
   pageLimit: number,
   standards: string[],
+  options: RunScanOptions = {},
 ): Promise<ScanResult> {
   const startTime = Date.now();
   const websiteOrigin = new URL(websiteUrl).origin;
+  const { scanId } = options;
 
   const browser = await chromium.launch({ headless: true });
 
@@ -40,7 +54,7 @@ export async function runScan(
     for (let i = 0; i < urls.length; i += CONCURRENCY) {
       const batch = urls.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
-        batch.map((url) => scanPageWithAxe(browser, url, websiteOrigin, standards)),
+        batch.map((url) => scanPageWithAxe(browser, url, websiteOrigin, standards, scanId)),
       );
       rawPages.push(...results);
     }
