@@ -1,0 +1,33 @@
+{
+  "name": "@accesskit/cli",
+  "version": "1.0.0",
+  "description": "AccessKit CLI — run accessibility scans from your terminal or CI.",
+  "type": "module",
+  "bin": {
+    "accesskit": "./accesskit.mjs"
+  },
+  "files": [
+    "accesskit.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "wcag",
+    "ci",
+    "axe-core",
+    "accesskit"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leroux1606/AccessKitOpus",
+    "directory": "cli"
+  },
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node ./accesskit.mjs"
+  }
+}

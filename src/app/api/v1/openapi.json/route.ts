@@ -179,6 +179,56 @@ const spec = {
         },
       },
     },
+    "/scans/{scanId}": {
+      get: {
+        summary: "Get a scan (with pages)",
+        operationId: "getScan",
+        tags: ["Scans"],
+        parameters: [{ name: "scanId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": {
+            description: "Scan details including per-page summary",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    data: {
+                      allOf: [
+                        { $ref: "#/components/schemas/Scan" },
+                        {
+                          type: "object",
+                          properties: {
+                            pageLimit: { type: "integer" },
+                            errorMessage: { type: "string", nullable: true },
+                            pages: {
+                              type: "array",
+                              items: {
+                                type: "object",
+                                properties: {
+                                  id: { type: "string" },
+                                  url: { type: "string", format: "uri" },
+                                  title: { type: "string", nullable: true },
+                                  score: { type: "integer", nullable: true },
+                                  violationCount: { type: "integer" },
+                                  loadTime: { type: "integer", nullable: true },
+                                  screenshotUrl: { type: "string", format: "uri", nullable: true },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "404": { description: "Scan not found" },
+        },
+      },
+    },
     "/issues": {
       get: {
         summary: "List issues",

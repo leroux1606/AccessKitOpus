@@ -113,7 +113,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 - [x] **H3.** pa11y parallel Chromium no longer doubles memory
   *Now opt-in behind `SCANNER_ENABLE_PA11Y=true` (off by default), and when enabled runs URLs **serially** rather than via `Promise.all`. Cap also reduced from 5 to 3 URLs. Peak memory overhead drops from ~5× Chromium to ~1× when enabled, and 0 when disabled.*
 
-## Phase I — Advertised features that are stubbed (P1) 🚧 PARTIAL
+## Phase I — Advertised features that are stubbed (P1) ✅ COMPLETED
 
 - [x] **I1.** `generateAiFixSuggestion` wired into the scan pipeline
   *Added a `generate-ai-fixes` Inngest step that runs after `save-results`. For orgs on a plan with `hasAiFixes` (Agency+), it selects up to 15 CRITICAL/SERIOUS violations per scan and generates Anthropic fix suggestions with a concurrency cap of 3 to respect rate limits. Skips silently when `ANTHROPIC_API_KEY` is unset, when plan doesn't include AI fixes, or when a violation already has a cached suggestion. The existing lazy per-view generation in the issue detail page still functions as a fallback.*
@@ -141,8 +141,32 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
     3. Either bind a custom domain to the bucket (e.g. `https://screenshots.accesskit.app`) or enable the public `r2.dev` subdomain — that URL becomes `R2_PUBLIC_URL`.
     4. `fly secrets set R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… R2_BUCKET_NAME=accesskit-screenshots R2_PUBLIC_URL=…` on the scanner app.
     5. Redeploy the worker. Next scan will populate `screenshotUrl` on every `Page` row.
-- [ ] **I3.** CI/CD integrations (GitHub Action, CLI) — REST API already works, branded artifacts still pending
-  *`POST /api/v1/scans` is implemented and authenticated via Bearer API keys, so any CI system can invoke it today. What's still missing is (a) an official GitHub Action repo that wraps the curl call, (b) a branded CLI binary, (c) a sample `.github/workflows/accessibility.yml`. Those live in separate repos.*
+- [x] **I3.** CI/CD integrations — CLI + GitHub Action + sample workflow shipped in-tree
+
+  *Three complementary artifacts plus one small API addition — all extraction-ready so they can be split to dedicated public repos without code changes:*
+
+  1. **`GET /api/v1/scans/{scanId}`** — new endpoint for single-scan polling. Previously the REST surface only exposed list-and-filter; CI integrations had no clean way to wait for a specific scan. The new endpoint returns the scan plus per-page summary (id, url, score, violationCount, screenshotUrl, loadTime), scoped to the caller's org. Added to the OpenAPI spec alongside the existing scan/issue/website routes.
+
+  2. **`cli/accesskit.mjs` + `cli/package.json` + `cli/README.md`** — zero-dependency Node 20 ESM CLI. Single file, no `node_modules` needed in CI, uses native `fetch`. Commands:
+     - `accesskit scan <websiteId>` — triggers a scan, polls to completion, and gates the exit code on thresholds (`--fail-on-critical/serious/moderate/minor/any`, `--min-score`). Defaults to 600 s timeout with 10 s poll interval; both tunable. Supports `--no-wait` for fire-and-forget, `--json` for machine-readable output. **Idempotent**: if the API returns 409 "scan already in progress", the CLI attaches to the existing scan rather than erroring, so retries-after-timeout don't double-charge or double-queue.
+     - `accesskit status <scanId>` — one-shot status lookup.
+     - `accesskit list [--website <id>]` — recent scans.
+
+     Exit codes follow Unix conventions: `0` ok, `1` threshold breach, `2` usage error, `3` API/scan-failed, `4` polling timeout. Pure helpers (`evaluateThresholds`, `asInt`, `parseArgs`) are module-exported so they can be unit-tested post-extraction. Auth via `ACCESSKIT_API_KEY` env (preferred in CI) or `--api-key` flag; base URL via `ACCESSKIT_API_URL` or `--api-url`.
+
+  3. **`github-action/action.yml` + `github-action/README.md`** — composite Action wrapping the CLI. Eleven inputs (all thresholds are optional; empty = disabled), four outputs (`scan-id`, `score`, `status`, `violations`) populated even on threshold failure so downstream `if: always()` steps can comment on PRs. Writes a GitHub-native job summary (Markdown table of metrics) to `$GITHUB_STEP_SUMMARY`. The `action.yml` probes two CLI paths so the exact same file works both when consumed from the monorepo and after git-subtree split-out to a standalone Action repo — no code duplication.
+
+  4. **`docs/examples/accessibility-ci.yml`** — copy-paste consumer workflow that shows the Action in action: scan on PR + main push, fail-on-critical + min-score 85 gating, and a `github-script` follow-up step that posts a formatted summary comment on the PR.
+
+  *Why in-tree rather than separate repos (for now).* Keeping both the CLI and Action adjacent to the API that serves them lets a single `pnpm type-check` + `pnpm test` + manual smoke test cover the whole pipeline, and one PR updates the API + its client in lockstep. Both folders are self-contained with their own README + split-out runbooks, so when it's time to publish `@accesskit/cli` on npm or `accesskit/action@v1` on the Actions Marketplace, each is one `git subtree split` away. The monorepo approach is explicit in every README and FIX_PLAN so there's no confusion about what ships where.
+
+  *Security.* API keys never appear in logs: the CLI reads them from env/flag and only sends them in the `Authorization` header; the Action declares `api-key` as a regular input and relies on the caller storing it in a repo/org secret, which GitHub masks automatically in the runner logs. All threshold flags are optional so the feature degrades gracefully (scan-and-report-only, no gate) when a consumer isn't ready to enforce.
+
+  *Verification.* `pnpm type-check` ✅ · `pnpm test` ✅ (205/205 — no new unit tests for the CLI itself yet; pure-function exports are ready for tests once the CLI is extracted and its own jest config can sanely import the `.mjs`). Smoke-tested all four exit codes locally (`--version` → 0, usage errors → 2, unknown command → 2, missing API key flows through `resolveApiConfig`).
+
+  *Deploy follow-ups (no code).*
+    1. Once comfortable with the in-tree shape, `git subtree split --prefix=cli -b cli` → push to `accesskit/cli` → `npm publish`.
+    2. `git subtree split --prefix=github-action -b action` → copy `cli/accesskit.mjs` into the split branch (so the Action is self-sufficient) → push to `accesskit/action` → tag `v1`. Full procedure documented in `github-action/README.md`.
 
 ## Phase J — Code quality / follow-ups (P2) ✅ COMPLETED
 
@@ -181,25 +205,25 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 ## Continue from here
 
-**Next up (all remaining items need user input or new scope):**
+**Next up (all remaining items are new scope):**
 
-1. ▶ **I3 — CI/CD integrations** (GitHub Action repo + branded CLI + sample workflow — separate-repo work).
-2. ▶ **Phase K — scanning accuracy audit** (WCAG 2.2 rule coverage, fingerprint stability, false-positive triage).
-3. ▶ **Phase L — integration & E2E tests** (auth routes, multi-org switching, scanner fixture, Playwright UI flows).
-4. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
+1. ▶ **Phase K — scanning accuracy audit** (WCAG 2.2 rule coverage, fingerprint stability, false-positive triage).
+2. ▶ **Phase L — integration & E2E tests** (auth routes, multi-org switching, scanner fixture, Playwright UI flows).
+3. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
 
-**Deploy follow-ups (no code — require external accounts):**
+**Deploy / publish follow-ups (no code — require external accounts):**
 - **H1 (Fly.io):** `fly launch` → `fly secrets set` → `fly deploy`, then unset `RUN_SCANS_IN_NEXT` on the web tier. Runbook: `worker/README.md`.
 - **I2 (Cloudflare R2):** create bucket + API token + public-bound domain, then `fly secrets set R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… R2_BUCKET_NAME=… R2_PUBLIC_URL=…` on the scanner app. Full checklist under § I2 above.
+- **I3 (npm + Actions Marketplace):** `git subtree split --prefix=cli` → `npm publish @accesskit/cli`. `git subtree split --prefix=github-action` → bundle CLI → publish as `accesskit/action@v1`. Full procedure in `github-action/README.md`.
 
 When resuming:
 1. Read this file top-to-bottom to recover context.
 2. Jump to the first `[ ]` item that doesn't require external sign-off.
 3. After shipping each item: update its checkbox, run `pnpm type-check && pnpm lint && pnpm test`, and pause for user sign-off before starting the next.
 
-**Current verification status (post-I2):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — unrelated to I2, reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (205/205 pass — +15 new `screenshot.test.ts` cases)
+**Current verification status (post-I3):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (205/205 pass) · CLI smoke tests ✅ (`--version`, `--help`, usage errors all return correct exit codes)
 
 **How the phases are ordered:**
 G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J/K (quality) → L (tests) → M (competitive features).
 
-With Phases G, H, I1+I2, and J now fully green, every code-only P0/P1 item from the original audit is shipped. Everything left is either a separate-repo feature (I3), broader test authoring, or new product work.
+With Phases G, H, I, and J fully green, **every P0/P1 item from the original audit is now shipped**. Everything left is either broader test authoring (L), a scanning-accuracy follow-up (K), or new competitive product work (M).

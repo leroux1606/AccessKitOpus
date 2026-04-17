@@ -1,0 +1,175 @@
+name: AccessKit Accessibility Scan
+description: >
+  Run an AccessKit accessibility scan from your GitHub workflow and fail
+  the build when critical issues or score thresholds regress.
+author: AccessKit
+
+branding:
+  icon: check-circle
+  color: purple
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inputs
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The only required inputs are `api-key` and `website-id`. Everything else
+# is a CI-level threshold — omit it to disable that particular gate.
+inputs:
+  api-key:
+    description: AccessKit API key (create one under Settings → API Keys).
+    required: true
+  website-id:
+    description: ID of the verified website to scan (e.g. wst_abc123).
+    required: true
+  api-url:
+    description: Base URL of your AccessKit deployment (omit for the default app URL).
+    required: false
+    default: ""
+  fail-on-critical:
+    description: Fail the job when `critical` count exceeds this number.
+    required: false
+    default: ""
+  fail-on-serious:
+    description: Fail the job when `serious` count exceeds this number.
+    required: false
+    default: ""
+  fail-on-moderate:
+    description: Fail the job when `moderate` count exceeds this number.
+    required: false
+    default: ""
+  fail-on-minor:
+    description: Fail the job when `minor` count exceeds this number.
+    required: false
+    default: ""
+  fail-on-any:
+    description: Fail the job when total violations exceed this number.
+    required: false
+    default: ""
+  min-score:
+    description: Fail the job when the scan score drops below this (0–100).
+    required: false
+    default: ""
+  timeout:
+    description: Seconds to wait for the scan to finish before timing out.
+    required: false
+    default: "600"
+  poll-interval:
+    description: Seconds between status polls while waiting.
+    required: false
+    default: "10"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Outputs — exposed to downstream steps via `${{ steps.<id>.outputs.<name> }}`.
+# Populated even on threshold failure so a follow-up step can comment on the
+# PR, post to Slack, etc.
+# ─────────────────────────────────────────────────────────────────────────────
+outputs:
+  scan-id:
+    description: ID of the scan that was executed.
+    value: ${{ steps.accesskit.outputs.scan-id }}
+  score:
+    description: Final accessibility score (0-100) or empty on failure.
+    value: ${{ steps.accesskit.outputs.score }}
+  status:
+    description: Final scan status (COMPLETED | FAILED | QUEUED | RUNNING).
+    value: ${{ steps.accesskit.outputs.status }}
+  violations:
+    description: Total violation count.
+    value: ${{ steps.accesskit.outputs.violations }}
+
+runs:
+  using: composite
+  steps:
+    # Node 20+ is required by the CLI (native `fetch`). Use a stable major
+    # so consumers of this Action don't need their own `setup-node` step.
+    - name: Ensure Node 20+
+      shell: bash
+      run: |
+        major=$(node -e 'process.stdout.write(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)
+        if [ "${major:-0}" -lt 20 ]; then
+          echo "Runner has Node ${major:-unknown}; AccessKit requires Node 20+."
+          echo "Add a 'uses: actions/setup-node@v4' step with 'node-version: 20' before this action."
+          exit 1
+        fi
+
+    - name: Run AccessKit scan
+      id: accesskit
+      shell: bash
+      env:
+        ACCESSKIT_API_KEY: ${{ inputs.api-key }}
+      run: |
+        set -euo pipefail
+
+        # Locate the CLI. When this Action is consumed standalone (post
+        # git-subtree split), `accesskit.mjs` sits next to action.yml.
+        # When consumed from the monorepo, it's a sibling `cli/` folder.
+        CLI="${{ github.action_path }}/accesskit.mjs"
+        if [ ! -f "$CLI" ]; then
+          CLI="${{ github.action_path }}/../cli/accesskit.mjs"
+        fi
+        if [ ! -f "$CLI" ]; then
+          echo "✖ Could not locate accesskit.mjs next to action.yml or in ../cli/"
+          exit 1
+        fi
+        chmod +x "$CLI" || true
+
+        # Build the flag list conditionally so empty inputs map to "no
+        # threshold" (not "threshold=0" which would be too strict).
+        args=(scan "${{ inputs.website-id }}" --json)
+
+        [ -n "${{ inputs.api-url }}" ]         && args+=(--api-url "${{ inputs.api-url }}")
+        [ -n "${{ inputs.fail-on-critical }}" ] && args+=(--fail-on-critical "${{ inputs.fail-on-critical }}")
+        [ -n "${{ inputs.fail-on-serious }}" ]  && args+=(--fail-on-serious  "${{ inputs.fail-on-serious }}")
+        [ -n "${{ inputs.fail-on-moderate }}" ] && args+=(--fail-on-moderate "${{ inputs.fail-on-moderate }}")
+        [ -n "${{ inputs.fail-on-minor }}" ]    && args+=(--fail-on-minor    "${{ inputs.fail-on-minor }}")
+        [ -n "${{ inputs.fail-on-any }}" ]      && args+=(--fail-on-any      "${{ inputs.fail-on-any }}")
+        [ -n "${{ inputs.min-score }}" ]        && args+=(--min-score        "${{ inputs.min-score }}")
+        [ -n "${{ inputs.timeout }}" ]          && args+=(--timeout          "${{ inputs.timeout }}")
+        [ -n "${{ inputs.poll-interval }}" ]    && args+=(--poll-interval    "${{ inputs.poll-interval }}")
+
+        # Capture the CLI's JSON output while letting its stderr logs
+        # stream through to the GitHub Actions log. `|| true` stops
+        # `set -e` from aborting before we can extract outputs; the real
+        # exit code is preserved in $? via the PIPESTATUS-free `tee`
+        # pattern below.
+        set +e
+        node "$CLI" "${args[@]}" > scan-result.json
+        code=$?
+        set -e
+
+        # Surface the JSON payload for downstream step consumption. Use
+        # `jq` if available, fall back to node for parsing so we don't
+        # depend on jq being on the runner.
+        if command -v jq >/dev/null 2>&1; then
+          scan_id=$(jq -r '.id // ""' scan-result.json || true)
+          score=$(jq -r '.score // ""' scan-result.json || true)
+          status=$(jq -r '.status // ""' scan-result.json || true)
+          violations=$(jq -r '.totalViolations // 0' scan-result.json || true)
+        else
+          scan_id=$(node -e 'try{const j=require("fs").readFileSync("scan-result.json","utf8");const o=JSON.parse(j);process.stdout.write(String(o.id||""));}catch{}')
+          score=$(node -e 'try{const j=require("fs").readFileSync("scan-result.json","utf8");const o=JSON.parse(j);process.stdout.write(String(o.score??""));}catch{}')
+          status=$(node -e 'try{const j=require("fs").readFileSync("scan-result.json","utf8");const o=JSON.parse(j);process.stdout.write(String(o.status||""));}catch{}')
+          violations=$(node -e 'try{const j=require("fs").readFileSync("scan-result.json","utf8");const o=JSON.parse(j);process.stdout.write(String(o.totalViolations??0));}catch{}')
+        fi
+
+        {
+          echo "scan-id=$scan_id"
+          echo "score=$score"
+          echo "status=$status"
+          echo "violations=$violations"
+        } >> "$GITHUB_OUTPUT"
+
+        # Add a collapsed summary to the job page so a glance at the
+        # Actions tab tells the reviewer what happened.
+        {
+          echo "## AccessKit Scan"
+          echo ""
+          echo "| Metric | Value |"
+          echo "| --- | --- |"
+          echo "| Scan ID | \`${scan_id:-—}\` |"
+          echo "| Status | ${status:-—} |"
+          echo "| Score | ${score:-—}/100 |"
+          echo "| Violations | ${violations:-0} |"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        exit $code
