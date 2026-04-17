@@ -3,8 +3,26 @@ import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { db } from "@/lib/db";
 import { PlanType, SubscriptionStatus } from "@prisma/client";
+import { checkWebhookRequest } from "@/lib/webhook-guard";
 
 export async function POST(req: NextRequest) {
+  // Defense-in-depth: reject browser-origin replays and oversized payloads
+  // before HMAC verification. Stripe webhooks are server-to-server and
+  // never set Origin; the largest events (invoice.payment_succeeded) are
+  // well under 100 KB.
+  const guard = checkWebhookRequest({
+    method: req.method,
+    origin: req.headers.get("origin"),
+    contentLength: req.headers.get("content-length"),
+  });
+  if (!guard.ok) {
+    console.warn(`[Stripe Webhook] Rejected: ${guard.reason}`);
+    return NextResponse.json(
+      { error: "Webhook rejected" },
+      { status: guard.status ?? 403 },
+    );
+  }
+
   const body = await req.text();
   const signature = req.headers.get("stripe-signature");
 

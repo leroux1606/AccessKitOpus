@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyWebhookSignature } from "@/lib/paystack";
 import { db } from "@/lib/db";
 import { PlanType } from "@prisma/client";
+import { checkWebhookRequest } from "@/lib/webhook-guard";
 
 /** Map PayStack plan codes → our PlanType (built from env vars at runtime) */
 function mapPlanCodeToPlan(planCode: string): PlanType | null {
@@ -22,6 +23,22 @@ function mapPlanCodeToPlan(planCode: string): PlanType | null {
 }
 
 export async function POST(request: NextRequest) {
+  // Defense-in-depth: reject browser-origin replays and oversized payloads
+  // before even parsing the body. Legitimate PayStack webhooks don't set
+  // Origin and are well under 1 MB.
+  const guard = checkWebhookRequest({
+    method: request.method,
+    origin: request.headers.get("origin"),
+    contentLength: request.headers.get("content-length"),
+  });
+  if (!guard.ok) {
+    console.warn(`[PayStack Webhook] Rejected: ${guard.reason}`);
+    return NextResponse.json(
+      { error: "Webhook rejected" },
+      { status: guard.status ?? 403 },
+    );
+  }
+
   const payload = await request.text();
   const signature = request.headers.get("x-paystack-signature");
 

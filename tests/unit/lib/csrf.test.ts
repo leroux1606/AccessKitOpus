@@ -35,6 +35,7 @@ describe("checkCsrf", () => {
       "/api/v1/scans",
       "/api/v1/openapi.json",
       "/api/health",
+      "/api/csp-report",
     ];
     it.each(skipped)("skips CSRF check for %s", (pathname) => {
       expect(run({ method: "POST", pathname, origin: "https://evil.example" })).toEqual({ ok: true });

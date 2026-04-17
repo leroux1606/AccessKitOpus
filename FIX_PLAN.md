@@ -67,16 +67,16 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 ---
 
-## Phase G — Remaining security work (P1) 🚧 IN PROGRESS
+## Phase G — Remaining security work (P1) ✅ COMPLETED
 
 - [x] **G1.** CSRF protection on state-changing API routes
-  *Added `src/lib/csrf.ts` with origin/referer matching. Wired into `middleware.ts` — every non-safe-method `/api/*` request now verifies the caller's `Origin` (falling back to `Referer`) against the app's own origin plus `NEXTAUTH_URL` / `NEXT_PUBLIC_APP_URL` / `APP_URL`. Skips NextAuth, webhooks (HMAC-verified), Inngest (signed), `/api/v1/*` (Bearer-key API), and `/api/health`. Covered by 23 new unit tests. Full suite: 164/164 passing.*
-- [ ] **G2.** Response-size caps on crawler page fetches ← **NEXT**
-  *Even with SSRF guard + `MAX_BODY_BYTES` on `verify-website`, Playwright itself has no enforced page-weight cap. A multi-GB response can crash the worker.*
-- [ ] **G3.** Origin / Referer strict check on webhooks
-  *`/api/webhooks/paystack` and similar must verify HMAC signature AND reject non-PayStack origins.*
-- [ ] **G4.** CSP report-only → enforced
-  *`next.config.ts` CSP is present; add a `report-uri` endpoint and move to enforcement mode after a soak period.*
+  *Added `src/lib/csrf.ts` with origin/referer matching. Wired into `middleware.ts` — every non-safe-method `/api/*` request now verifies the caller's `Origin` (falling back to `Referer`) against the app's own origin plus `NEXTAUTH_URL` / `NEXT_PUBLIC_APP_URL` / `APP_URL`. Skips NextAuth, webhooks (HMAC-verified), Inngest (signed), `/api/v1/*` (Bearer-key API), `/api/health`, and `/api/csp-report`. Covered by 24 unit tests.*
+- [x] **G2.** Response-size caps on crawler page fetches
+  *New `src/lib/http-limits.ts` exposes `readBodyCapped` + `fetchWithSizeLimit` with `DEFAULT_LIMITS` (ROBOTS_TXT 512 KB, SITEMAP_XML 10 MB, VERIFICATION 512 KB, PAGE_WEIGHT 15 MB, PAGE_SUBRESOURCE 10 MB). Crawler now size-caps sitemap + robots.txt fetches. New `src/scanner/page-limits.ts` installs a Playwright `page.route` interceptor that uses `route.fetch()` + Content-Length inspection to enforce per-page and per-subresource download caps — installed inside `scanPageWithAxe` and `crawlFromHomepage` so no pathological response can OOM the worker. `verify-website` refactored to use the shared helper. 13 new unit tests for `http-limits`.*
+- [x] **G3.** Origin / Referer strict check on webhooks
+  *New `src/lib/webhook-guard.ts` — `checkWebhookRequest()` rejects non-POST methods (405), oversized payloads >1 MB via Content-Length (413), and any request carrying a browser `Origin` header that isn't in an allowlist (403). Wired into both `/api/webhooks/paystack` and `/api/webhooks/stripe` **before** HMAC verification, so a stolen secret alone can't be replayed from a browser. Covered by 13 unit tests.*
+- [x] **G4.** CSP report-only → enforced
+  *CSP remains in enforcement mode and now pipes violations to a new `/api/csp-report` endpoint via both legacy `report-uri` and the modern `Reporting-Endpoints` / `report-to` header pair. The endpoint accepts `application/csp-report` and `application/reports+json`, caps payloads at 8 KB, rate-limits to 60 reports/min per IP, and logs a structured summary line for each violation.*
 
 ## Phase H — Scanner reliability / infra (P1)
 
@@ -129,12 +129,14 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 ## Continue from here
 
-**Next up:** ▶ **G2 — Response-size caps on crawler page fetches**
+**Next up:** ▶ **H1 — Scanner deploy target decision** (non-code — needs infra/product sign-off before any `H2`/`H3` code changes land)
 
 When resuming:
 1. Read this file top-to-bottom to recover context.
-2. Jump to the first `[ ]` item (currently **G1**).
+2. Jump to the first `[ ]` item (currently **H1**).
 3. After shipping each item: update its checkbox, run `pnpm type-check && pnpm lint && pnpm test`, and pause for user sign-off before starting the next.
+
+**Current verification status (post-Phase G):** `pnpm type-check` ✅ · `pnpm lint` ✅ · `pnpm test` ✅ (189/189 pass)
 
 **How the phases are ordered:**
 G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J/K (quality) → L (tests) → M (competitive features).

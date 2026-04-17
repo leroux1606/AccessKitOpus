@@ -12,6 +12,7 @@
  *   - /api/inngest       Inngest webhooks; signed
  *   - /api/v1/*          public API surface; uses Bearer API keys, no cookie
  *   - /api/health        public health probe; GET only anyway
+ *   - /api/csp-report    browser-beaconed CSP violations; own rate limiter
  *
  * Request methods treated as "safe" (not checked):
  *   - GET, HEAD, OPTIONS
@@ -25,6 +26,7 @@ const SKIP_PREFIXES = [
   "/api/inngest",
   "/api/v1/",
   "/api/health",
+  "/api/csp-report",
 ];
 
 export interface CsrfCheckInput {

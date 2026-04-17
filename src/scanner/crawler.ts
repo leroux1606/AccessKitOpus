@@ -1,5 +1,7 @@
 import type { Browser } from "playwright";
 import { assertSafeFetchUrl } from "@/lib/ssrf-guard";
+import { DEFAULT_LIMITS, fetchWithSizeLimit } from "@/lib/http-limits";
+import { applyPageResourceCap } from "./page-limits";
 
 // Extracts URLs from a sitemap.xml string using regex (avoids XML parser dep)
 export function parseSitemapUrls(xml: string): string[] {
@@ -120,19 +122,17 @@ async function fetchSitemapUrls(websiteUrl: string): Promise<string[]> {
   ];
 
   for (const sitemapUrl of sitemapUrls) {
-    try {
-      const res = await fetch(sitemapUrl, {
-        signal: AbortSignal.timeout(10000),
-        headers: { "User-Agent": "AccessKit-Scanner/1.0" },
-      });
-      if (!res.ok) continue;
-      const xml = await res.text();
-      const urls = parseSitemapUrls(xml);
-      if (urls.length > 0) {
-        return urls.filter((u) => normalizeUrl(u, origin) !== null);
-      }
-    } catch {
-      // try next sitemap URL
+    const result = await fetchWithSizeLimit(sitemapUrl, {
+      maxBytes: DEFAULT_LIMITS.SITEMAP_XML,
+      timeoutMs: 10_000,
+      headers: { "User-Agent": "AccessKit-Scanner/1.0" },
+    });
+    if (!result || !result.response.ok) continue;
+    // A truncated sitemap may be missing closing tags. `parseSitemapUrls`
+    // is regex-based so it still extracts every complete <loc> in the prefix.
+    const urls = parseSitemapUrls(result.body);
+    if (urls.length > 0) {
+      return urls.filter((u) => normalizeUrl(u, origin) !== null);
     }
   }
   return [];
@@ -148,6 +148,7 @@ async function crawlFromHomepage(
   const discovered = new Set<string>();
 
   const page = await browser.newPage();
+  const cap = await applyPageResourceCap(page);
   try {
     await page.goto(websiteUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
@@ -164,6 +165,7 @@ async function crawlFromHomepage(
   } catch {
     // If homepage fails, at least scan the homepage itself
   } finally {
+    await cap.dispose();
     await page.close();
   }
 
@@ -189,17 +191,14 @@ export async function crawlWebsite(
 
   const origin = new URL(websiteUrl).origin;
 
-  // Check robots.txt
-  let robotsTxt = "";
-  try {
-    const res = await fetch(`${origin}/robots.txt`, {
-      signal: AbortSignal.timeout(5000),
-      headers: { "User-Agent": "AccessKit-Scanner/1.0" },
-    });
-    if (res.ok) robotsTxt = await res.text();
-  } catch {
-    // robots.txt is optional
-  }
+  // Check robots.txt (size-capped — a pathological robots.txt could exhaust memory)
+  const robotsResult = await fetchWithSizeLimit(`${origin}/robots.txt`, {
+    maxBytes: DEFAULT_LIMITS.ROBOTS_TXT,
+    timeoutMs: 5_000,
+    headers: { "User-Agent": "AccessKit-Scanner/1.0" },
+  });
+  const robotsTxt =
+    robotsResult && robotsResult.response.ok ? robotsResult.body : "";
 
   // Try sitemap first
   let urls = await fetchSitemapUrls(websiteUrl);

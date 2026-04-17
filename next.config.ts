@@ -3,7 +3,15 @@ import type { NextConfig } from "next";
 const isDev = process.env.NODE_ENV === "development";
 
 const securityHeaders = [
-  // Content Security Policy — restricts resource loading to trusted origins
+  // Modern Reporting API endpoint — browsers POST CSP violations here.
+  {
+    key: "Reporting-Endpoints",
+    value: `csp-endpoint="/api/csp-report"`,
+  },
+  // Content Security Policy — restricts resource loading to trusted origins.
+  // Enforced (not report-only) and pipes violations to /api/csp-report via
+  // both the legacy `report-uri` and modern `report-to` directives so we
+  // can observe what gets blocked in production.
   {
     key: "Content-Security-Policy",
     value: [
@@ -18,6 +26,8 @@ const securityHeaders = [
       "base-uri 'self'",
       "form-action 'self'",
       "upgrade-insecure-requests",
+      "report-uri /api/csp-report",
+      "report-to csp-endpoint",
     ].join("; "),
   },
   // Prevent clickjacking

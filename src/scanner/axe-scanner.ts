@@ -16,6 +16,7 @@ import {
 } from "./standards-mapper";
 import { generateFixSuggestion, estimateEffort } from "./fix-generator";
 import { generateFingerprint } from "./deduplicator";
+import { applyPageResourceCap } from "./page-limits";
 
 export async function scanPageWithAxe(
   browser: Browser,
@@ -25,6 +26,11 @@ export async function scanPageWithAxe(
 ): Promise<PageScanResult> {
   const page = await browser.newPage();
   const startTime = Date.now();
+
+  // Cap total page weight so a malicious or accidentally huge response
+  // cannot OOM the worker. Installed before navigation so every request
+  // (HTML + JS + CSS + images) is intercepted.
+  const cap = await applyPageResourceCap(page);
 
   try {
     await page.goto(url, { waitUntil: "networkidle", timeout: 30000 }).catch(() =>
@@ -73,6 +79,7 @@ export async function scanPageWithAxe(
 
     return { url, title, loadTime, violations, score: 0 };
   } finally {
+    await cap.dispose();
     await page.close();
   }
 }

@@ -4,33 +4,7 @@ import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
 import { assertSafeFetchUrl } from "@/lib/ssrf-guard";
 import { checkRateLimit } from "@/lib/rate-limiter";
-
-const MAX_BODY_BYTES = 512 * 1024; // 512 KB — prevent memory exhaustion on large pages
-
-async function readBodyCapped(res: Response): Promise<string> {
-  const reader = res.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done || !value) break;
-      received += value.length;
-      if (received > MAX_BODY_BYTES) {
-        reader.cancel().catch(() => {});
-        break;
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const buf = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-  let pos = 0;
-  for (const c of chunks) { buf.set(c, pos); pos += c.length; }
-  return new TextDecoder().decode(buf);
-}
+import { DEFAULT_LIMITS, readBodyCapped } from "@/lib/http-limits";
 
 /**
  * Verifies website ownership by checking all three methods:
@@ -121,7 +95,7 @@ export async function POST(req: NextRequest) {
     clearTimeout(timeoutId);
 
     if (response.ok) {
-      const html = await readBodyCapped(response);
+      const { body: html } = await readBodyCapped(response, DEFAULT_LIMITS.VERIFICATION);
       const metaPattern = new RegExp(
         `<meta[^>]+name=["']accesskit-verification["'][^>]+content=["']${token}["']`,
         "i"
@@ -176,8 +150,8 @@ export async function POST(req: NextRequest) {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        const content = (await readBodyCapped(response)).trim();
-        if (content === token) {
+        const { body } = await readBodyCapped(response, DEFAULT_LIMITS.VERIFICATION);
+        if (body.trim() === token) {
           verifiedMethod = "FILE_UPLOAD";
         }
       }
