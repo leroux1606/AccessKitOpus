@@ -13,7 +13,7 @@ const nodeRequire = createRequire(import.meta.url);
 const axeSource = readFileSync(nodeRequire.resolve("axe-core/axe.min.js"), "utf8");
 import type { ScanViolation, PageScanResult } from "@/types/scan";
 import {
-  mapAxeImpactToSeverity,
+  mapAxeViolationToSeverity,
   mapTagsToCategory,
   mapTagsToStandards,
   extractWcagCriterion,
@@ -70,7 +70,7 @@ export async function scanPageWithAxe(
         violations.push({
           ruleId: violation.id,
           engine: "AXE_CORE",
-          severity: mapAxeImpactToSeverity(violation.impact),
+          severity: mapAxeViolationToSeverity(violation.impact, violation.tags),
           impact: violation.impact ?? "moderate",
           category: mapTagsToCategory(violation.tags),
           standards: mapTagsToStandards(violation.tags),

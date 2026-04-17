@@ -177,14 +177,54 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 - [x] **J3.** Audit server-action imports — remove remaining unused `db` imports after multi-org refactor
   *Ran a full-repo named-import audit (every `import { ... } from "@/lib/db"` plus a broader sweep of all named-import blocks in `src/`). Zero unused `db` imports remain and zero unused named imports overall — the multi-org refactor (B1) already cleaned them up as it touched each file. No code change required; item closed with verification recorded here.*
 
-## Phase K — Scanning accuracy & recommendations (P2)
+## Phase K — Scanning accuracy & recommendations (P2) ✅ COMPLETED
 
-- [ ] **K1.** Add WCAG 2.2 rule coverage audit
-  *Confirm axe-core v4.x + pa11y ruleset covers 2.2 Level A/AA new criteria (Focus Not Obscured, Dragging Movements, Target Size Minimum, Consistent Help, Redundant Entry, Accessible Authentication).*
-- [ ] **K2.** Fingerprint stability across re-scans
-  *Verify `fingerprint` generation uses CSS selector + rule + element structure so "fixed" tracking works when page layout shifts slightly.*
-- [ ] **K3.** False-positive triage for common landmark/region rules
-  *Axe's `region` and `landmark-one-main` rules frequently flag modern SPA shells incorrectly. Decide whether to down-weight or exclude.*
+- [x] **K1.** WCAG 2.2 rule coverage audit + default tag set bumped to 2.2 AA
+
+  *Audit result.* axe-core v4.11.1 (currently installed) advertises exactly **one** rule tagged `wcag22aa`: `target-size`, which covers SC 2.5.8 Target Size (Minimum) at Level AA. The other eight new WCAG 2.2 success criteria are intrinsically hard / impossible to automate with a static DOM snapshot:
+  - **2.4.11 Focus Not Obscured (Min) / 2.4.12 (Enh) / 2.4.13 Focus Appearance** — require observing focus behaviour during interaction, not static analysis.
+  - **2.5.7 Dragging Movements** — requires modelling pointer-event semantics.
+  - **3.2.6 Consistent Help / 3.3.7 Redundant Entry** — cross-page / cross-form context axe doesn't build.
+  - **3.3.8 Accessible Authentication (Min) / 3.3.9 (Enh)** — cognitive-function test heuristics not implemented.
+
+  pa11y's HTML_CodeSniffer runner still targets WCAG 2.1, so its `WCAG2AA` standard is used as-is and any hits flow into the shared violation pipeline — no new pa11y wiring needed.
+
+  *Code shipped.* `src/scanner/standards-mapper.ts`:
+  - New exported `WCAG_22_COVERAGE` constant — the nine-criterion matrix above, each row carrying `{criterion, level, name, automatable, axeRuleId?, notes?}`. Single source of truth for any future "What does our scanner cover?" UI.
+  - `standardsToAxeTags([])` now defaults to the full WCAG 2.2 AA tag set (`wcag2a` + `wcag2aa` + `wcag21a` + `wcag21aa` + `wcag22aa`). Previously defaulted to 2.1 AA, which silently skipped `target-size`. The new default is a strict superset — no regression for callers that explicitly request 2.1 AA.
+  - Docstring in the file captures the audit above so future contributors can reconcile against axe release notes without rerunning the discovery.
+
+  *Tests.* `tests/unit/scanner/standards-mapper.test.ts` — new `WCAG_22_COVERAGE` describe block (3 cases) + new assertions on the default tag set including `wcag22aa`. Full suite still green.
+
+- [x] **K2.** Fingerprint stabilised against layout & build-hash drift
+
+  *Problem recap.* `generateFingerprint` used `sha256(ruleId:cssSelector:origin)` unmodified. Axe-generated selectors often contain positional filters (`:nth-child(3)`, `div[2]`) and CSS-in-JS build hashes (`css-1a2b3c4`, `sc-abcDEF12`) that shift between deploys. Every such shift invalidated "is this a regression?" tracking and marked the same underlying violation as a new issue.
+
+  *Algorithm shipped.* `src/scanner/deduplicator.ts` rewritten around a new exported `normalizeSelector()` pass:
+    1. Strip positional / ordinal pseudo-classes (`:nth-child`, `:nth-of-type`, `:first-child`, `:last-child`, `:only-child`, plus the `-of-type` variants).
+    2. Strip bracketed XPath-style positional indices (`div[1]` → `div`).
+    3. Strip obviously auto-generated class tokens matched by six patterns covering Emotion (`css-…`), styled-components (`sc-…`), CSS Modules (`_abc123`, `Component_button__aB3cD`), Next.js (`__className_abc123`), and generic hash-suffixed semantic classes.
+    4. Sort the remaining class / attribute / pseudo tokens inside each compound so `.btn.primary` and `.primary.btn` hash identically.
+    5. Lowercase tag names, collapse whitespace around combinators, sort comma-separated branches.
+    6. Prefix the final digest with a `v2:` tag so we can tell new and old fingerprints apart in the DB if migration is ever needed.
+
+  *Migration impact.* The one-time switchover means existing DB rows (all `v1` under the old algorithm) won't match any newly scanned violation until their next scan re-emits a `v2` fingerprint. In practice this looks like one scan where previously-tracked issues are briefly "re-opened" then immediately resolved on the following scan — acceptable given the value of stable cross-scan tracking thereafter.
+
+  *Tests.* `tests/unit/scanner/deduplicator.test.ts` — added 10 new cases covering ordinal drift, XPath index drift, Emotion hash drift, styled-components `sc-*` drift, semantic-class preservation, class-order independence, whitespace collapse, ID uniqueness preservation; plus 10 cases for the `normalizeSelector` helper directly (empty input, pseudo-strip, index-strip, hash-strip, sorting, branch sorting, ID/attr preservation, tag-lowercasing, whitespace, pure-pseudo → wildcard).
+
+- [x] **K3.** Landmark / region false-positive triage — exclude by default, down-weight on opt-in
+
+  *Decision.* Axe's `region`, `landmark-one-main`, and the full `landmark-*` family are all tagged **`best-practice` only** — no WCAG tag — so as long as the scanner runs with WCAG tag filters (which it has done since day one) they **never fire in default mode**. That's the correct behaviour for modern component-driven SPAs where content legitimately lives inside nested React trees rather than explicit landmarks, and where axe's heuristics throw a high noise-to-signal ratio.
+
+  *Opt-in.* New `SCANNER_INCLUDE_BEST_PRACTICE=true` env flag lets ops teams who *do* want best-practice heuristics turn them on per-environment. `standardsToAxeTags` adds the `best-practice` tag to the tag set when the flag is set. Exact-string match on `"true"` — `"1"`, `"yes"`, `"True"` are deliberately rejected so there's no ambiguity.
+
+  *Safety rail.* Even when opted in, every best-practice-only violation is force-clamped to MINOR severity via the new `mapAxeViolationToSeverity(impact, tags)` helper, which calls `isBestPracticeOnly(tags)` first and only delegates to the regular impact mapping when at least one real standard tag (wcag*, section508) is present. This keeps landmark heuristics from ever inflating the CRITICAL/SERIOUS counts that drive the gating score, PR gate thresholds, and dashboard badges.
+
+  *Wiring.* `src/scanner/axe-scanner.ts` swapped `mapAxeImpactToSeverity` → `mapAxeViolationToSeverity` at the sole call site inside the axe results loop. No other scanner call-sites consume axe impact + tags together so no further wiring is needed.
+
+  *Tests.* `tests/unit/scanner/standards-mapper.test.ts` — new describe blocks for `bestPracticeRulesEnabled` (3 cases: unset, non-exact truthy, exact `"true"`), `isBestPracticeOnly` (4 cases: best-practice-only, alongside WCAG, absent, alongside section508), `mapAxeViolationToSeverity` (2 cases: down-weight happy path + delegate path), and the env-var behaviour inside the `standardsToAxeTags` describe block (adds tag only when opted in; default set does NOT contain `best-practice`).
+
+  **Verification (post-K):** `pnpm type-check` ✅ · `pnpm test` ✅ (240/240 pass, up from 205) · `pnpm lint` ⚠ pre-existing `@rushstack/eslint-patch` vs ESLint 9 incompatibility (unchanged from Phase J baseline).
 
 ## Phase L — Testing (P2)
 
@@ -207,9 +247,8 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 **Next up (all remaining items are new scope):**
 
-1. ▶ **Phase K — scanning accuracy audit** (WCAG 2.2 rule coverage, fingerprint stability, false-positive triage).
-2. ▶ **Phase L — integration & E2E tests** (auth routes, multi-org switching, scanner fixture, Playwright UI flows).
-3. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
+1. ▶ **Phase L — integration & E2E tests** (auth routes, multi-org switching, scanner fixture, Playwright UI flows).
+2. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
 
 **Deploy / publish follow-ups (no code — require external accounts):**
 - **H1 (Fly.io):** `fly launch` → `fly secrets set` → `fly deploy`, then unset `RUN_SCANS_IN_NEXT` on the web tier. Runbook: `worker/README.md`.
@@ -221,9 +260,9 @@ When resuming:
 2. Jump to the first `[ ]` item that doesn't require external sign-off.
 3. After shipping each item: update its checkbox, run `pnpm type-check && pnpm lint && pnpm test`, and pause for user sign-off before starting the next.
 
-**Current verification status (post-I3):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (205/205 pass) · CLI smoke tests ✅ (`--version`, `--help`, usage errors all return correct exit codes)
+**Current verification status (post-K):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (240/240 pass) · CLI smoke tests ✅ (`--version`, `--help`, usage errors all return correct exit codes)
 
 **How the phases are ordered:**
-G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J/K (quality) → L (tests) → M (competitive features).
+G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J (quality) → K (scanning accuracy) → L (tests) → M (competitive features).
 
-With Phases G, H, I, and J fully green, **every P0/P1 item from the original audit is now shipped**. Everything left is either broader test authoring (L), a scanning-accuracy follow-up (K), or new competitive product work (M).
+With Phases G, H, I, J, and K fully green, **every P0/P1/P2 item from the original audit + scanning-accuracy follow-up is now shipped**. Everything left is either broader test authoring (L) or new competitive product work (M).

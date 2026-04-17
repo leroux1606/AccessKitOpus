@@ -1,10 +1,14 @@
 import {
   mapAxeImpactToSeverity,
+  mapAxeViolationToSeverity,
+  isBestPracticeOnly,
   mapTagsToCategory,
   mapTagsToStandards,
   extractWcagCriterion,
   extractWcagLevel,
   standardsToAxeTags,
+  bestPracticeRulesEnabled,
+  WCAG_22_COVERAGE,
 } from "@/scanner/standards-mapper";
 
 // ─── mapAxeImpactToSeverity ───────────────────────────────────────────────────
@@ -164,12 +168,38 @@ describe("extractWcagLevel", () => {
 // ─── standardsToAxeTags ───────────────────────────────────────────────────────
 
 describe("standardsToAxeTags", () => {
-  it("returns WCAG 2.1 AA tags as default when array is empty", () => {
+  const originalEnv = process.env.SCANNER_INCLUDE_BEST_PRACTICE;
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.SCANNER_INCLUDE_BEST_PRACTICE;
+    } else {
+      process.env.SCANNER_INCLUDE_BEST_PRACTICE = originalEnv;
+    }
+  });
+
+  it("returns WCAG 2.2 AA tag set as default when array is empty", () => {
+    delete process.env.SCANNER_INCLUDE_BEST_PRACTICE;
     const tags = standardsToAxeTags([]);
     expect(tags).toContain("wcag2a");
     expect(tags).toContain("wcag2aa");
     expect(tags).toContain("wcag21a");
     expect(tags).toContain("wcag21aa");
+    expect(tags).toContain("wcag22aa");
+  });
+
+  it("default tag set does NOT include best-practice unless opted in", () => {
+    delete process.env.SCANNER_INCLUDE_BEST_PRACTICE;
+    expect(standardsToAxeTags([])).not.toContain("best-practice");
+  });
+
+  it("adds best-practice when SCANNER_INCLUDE_BEST_PRACTICE=true", () => {
+    process.env.SCANNER_INCLUDE_BEST_PRACTICE = "true";
+    expect(standardsToAxeTags(["WCAG22_AA"])).toContain("best-practice");
+  });
+
+  it("does not add best-practice for other truthy values", () => {
+    process.env.SCANNER_INCLUDE_BEST_PRACTICE = "1";
+    expect(standardsToAxeTags(["WCAG22_AA"])).not.toContain("best-practice");
   });
 
   it("WCAG21_A maps to wcag2a and wcag21a tags", () => {
@@ -193,5 +223,106 @@ describe("standardsToAxeTags", () => {
     const tags = standardsToAxeTags(["WCAG21_AA", "WCAG22_AA"]);
     const unique = new Set(tags);
     expect(unique.size).toBe(tags.length);
+  });
+});
+
+// ─── bestPracticeRulesEnabled ─────────────────────────────────────────────────
+
+describe("bestPracticeRulesEnabled", () => {
+  const originalEnv = process.env.SCANNER_INCLUDE_BEST_PRACTICE;
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.SCANNER_INCLUDE_BEST_PRACTICE;
+    } else {
+      process.env.SCANNER_INCLUDE_BEST_PRACTICE = originalEnv;
+    }
+  });
+
+  it("returns false when env var is unset", () => {
+    delete process.env.SCANNER_INCLUDE_BEST_PRACTICE;
+    expect(bestPracticeRulesEnabled()).toBe(false);
+  });
+
+  it("returns false for any non-exact-'true' value", () => {
+    process.env.SCANNER_INCLUDE_BEST_PRACTICE = "yes";
+    expect(bestPracticeRulesEnabled()).toBe(false);
+    process.env.SCANNER_INCLUDE_BEST_PRACTICE = "True";
+    expect(bestPracticeRulesEnabled()).toBe(false);
+  });
+
+  it("returns true only when exactly 'true'", () => {
+    process.env.SCANNER_INCLUDE_BEST_PRACTICE = "true";
+    expect(bestPracticeRulesEnabled()).toBe(true);
+  });
+});
+
+// ─── isBestPracticeOnly / mapAxeViolationToSeverity ──────────────────────────
+
+describe("isBestPracticeOnly", () => {
+  it("returns true when tags contain only best-practice", () => {
+    expect(isBestPracticeOnly(["best-practice", "cat.semantics"])).toBe(true);
+  });
+
+  it("returns false when any WCAG tag is present alongside best-practice", () => {
+    expect(isBestPracticeOnly(["best-practice", "wcag2aa"])).toBe(false);
+    expect(isBestPracticeOnly(["best-practice", "wcag412"])).toBe(false);
+    expect(isBestPracticeOnly(["best-practice", "wcag22aa"])).toBe(false);
+  });
+
+  it("returns false when best-practice tag is absent", () => {
+    expect(isBestPracticeOnly(["cat.semantics", "wcag2aa"])).toBe(false);
+    expect(isBestPracticeOnly([])).toBe(false);
+  });
+
+  it("treats section508 as a real standard, not best-practice", () => {
+    expect(isBestPracticeOnly(["best-practice", "section508"])).toBe(false);
+  });
+});
+
+describe("mapAxeViolationToSeverity", () => {
+  it("down-weights best-practice-only violations to MINOR regardless of impact", () => {
+    expect(mapAxeViolationToSeverity("critical", ["best-practice", "cat.semantics"])).toBe("MINOR");
+    expect(mapAxeViolationToSeverity("serious", ["best-practice"])).toBe("MINOR");
+    expect(mapAxeViolationToSeverity(null, ["best-practice"])).toBe("MINOR");
+  });
+
+  it("delegates to mapAxeImpactToSeverity when a WCAG tag is present", () => {
+    expect(mapAxeViolationToSeverity("critical", ["wcag2aa", "best-practice"])).toBe("CRITICAL");
+    expect(mapAxeViolationToSeverity("serious", ["wcag22aa"])).toBe("SERIOUS");
+    expect(mapAxeViolationToSeverity("minor", ["wcag2a"])).toBe("MINOR");
+  });
+});
+
+// ─── WCAG 2.2 coverage matrix ────────────────────────────────────────────────
+
+describe("WCAG_22_COVERAGE", () => {
+  it("documents all 9 WCAG 2.2 new success criteria", () => {
+    expect(WCAG_22_COVERAGE).toHaveLength(9);
+    const criteria = WCAG_22_COVERAGE.map((c) => c.criterion).sort();
+    expect(criteria).toEqual([
+      "2.4.11",
+      "2.4.12",
+      "2.4.13",
+      "2.5.7",
+      "2.5.8",
+      "3.2.6",
+      "3.3.7",
+      "3.3.8",
+      "3.3.9",
+    ]);
+  });
+
+  it("flags SC 2.5.8 Target Size (Minimum) as automatable via axe target-size rule", () => {
+    const sc = WCAG_22_COVERAGE.find((c) => c.criterion === "2.5.8");
+    expect(sc).toBeDefined();
+    expect(sc?.automatable).toBe(true);
+    expect(sc?.axeRuleId).toBe("target-size");
+    expect(sc?.level).toBe("AA");
+  });
+
+  it("marks the remaining 8 new WCAG 2.2 SCs as not automatable", () => {
+    const nonAutomatable = WCAG_22_COVERAGE.filter((c) => !c.automatable);
+    expect(nonAutomatable).toHaveLength(8);
+    expect(nonAutomatable.every((c) => !c.axeRuleId)).toBe(true);
   });
 });
