@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canManageTeam } from "@/lib/permissions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { InviteForm } from "@/components/dashboard/invite-form";
 import { PendingInvitations } from "@/components/dashboard/pending-invitations";
@@ -18,7 +19,7 @@ export default async function TeamPage() {
   if (!membership) redirect("/login");
 
   const org = membership.organization;
-  const canManage = membership.role === "OWNER" || membership.role === "ADMIN";
+  const canManage = canManageTeam(membership.role);
   const limits = getPlanLimits(org.plan);
 
   const [members, pendingInvitations] = await Promise.all([

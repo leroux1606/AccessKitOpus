@@ -17,7 +17,7 @@ export function canManageTeam(role: Role): boolean {
 }
 
 export function canManageBilling(role: Role): boolean {
-  return hasRole(role, "OWNER");
+  return hasRole(role, "ADMIN");
 }
 
 export function canRunScans(role: Role): boolean {

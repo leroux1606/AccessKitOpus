@@ -1,0 +1,52 @@
+# Keep the build context lean — everything the Dockerfile doesn't COPY in
+# directly should be excluded to speed up `fly deploy` uploads and avoid
+# leaking local state into images.
+
+# Node / package-manager artefacts
+node_modules
+npm-debug.log
+pnpm-debug.log
+yarn-error.log
+
+# Next.js build output (the worker never runs Next.js)
+.next
+out
+
+# Local env — Fly reads from `fly secrets` at runtime
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Tests + editor clutter
+tests
+coverage
+playwright-report
+test-results
+.vscode
+.idea
+*.log
+
+# VCS
+.git
+.gitignore
+.github
+
+# Docs & planning files (not needed in the image)
+*.md
+!README.md
+PHASES-TODO.md
+PROGRESS.md
+STATUS.md
+review.md
+"full picture UI fix.txt"
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Generated / cache
+tsconfig.tsbuildinfo
+.turbo
+.cache

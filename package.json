@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "worker:dev": "tsx --watch worker/server.ts",
+    "worker:start": "tsx worker/server.ts",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test": "jest",

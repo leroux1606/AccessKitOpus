@@ -1,0 +1,87 @@
+# Fly.io config for the AccessKit scanner worker.
+#
+# This file configures the Fly Machines that serve the Playwright-heavy
+# `scan-website` Inngest function. See FIX_PLAN.md § H1 and
+# `worker/server.ts` for the full architectural decision.
+#
+# First-time setup:
+#
+#   fly launch --name accesskit-scanner --no-deploy --copy-config
+#   fly secrets set \
+#     DATABASE_URL=… \
+#     INNGEST_EVENT_KEY=… \
+#     INNGEST_SIGNING_KEY=… \
+#     ANTHROPIC_API_KEY=…         # optional, only if AI fixes are enabled
+#   fly deploy
+#
+# After first deploy, set `RUN_SCANS_IN_NEXT` to anything other than "true"
+# in the Next.js production env (Vercel, Netlify, …) so only this worker
+# advertises `scan-website` to Inngest Cloud.
+
+app = "accesskit-scanner"
+primary_region = "iad"                # co-locate with Supabase US-East; override in `fly launch` if needed
+
+# ────────────────────────────────────────────────────────────────────
+# Build
+# ────────────────────────────────────────────────────────────────────
+[build]
+  dockerfile = "Dockerfile"
+
+# ────────────────────────────────────────────────────────────────────
+# HTTP service
+# ────────────────────────────────────────────────────────────────────
+# Inngest Cloud POSTs signed webhooks to /api/inngest. Fly Proxy terminates
+# TLS (force_https=true) and forwards plaintext to the container on
+# `internal_port`.
+#
+# Scale-to-zero:
+#   auto_stop_machines  = "stop"  → suspend Machines with no traffic
+#   auto_start_machines = true    → wake on incoming request (cold start ~1-2s)
+#   min_machines_running = 0      → allow full scale-to-zero
+#
+# Concurrency:
+#   scanWebsiteJob is capped at 3 concurrent runs by Inngest. We let each
+#   Machine handle up to 3 scans before the proxy spawns a second Machine.
+#   `requests` type is used because each scan maps to exactly one HTTP
+#   webhook delivery from Inngest.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 3
+    hard_limit = 6
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# ────────────────────────────────────────────────────────────────────
+# Machine size
+# ────────────────────────────────────────────────────────────────────
+# 1 shared vCPU + 2 GB RAM is the minimum for reliable Chromium operation.
+# Upgrade to `shared-cpu-2x` with memory_mb = 4096 if scans OOM at higher
+# page limits or if `SCANNER_ENABLE_PA11Y=true` is turned on (pa11y spawns
+# a second Chromium per URL).
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory_mb = 2048
+  cpus = 1
+
+# ────────────────────────────────────────────────────────────────────
+# Deploy
+# ────────────────────────────────────────────────────────────────────
+# `rolling` strategy so in-flight scans finish before the old Machine
+# exits. Fly sends SIGINT; `worker/server.ts` drains the HTTP server and
+# waits up to 25 s for open requests before force-exit.
+[deploy]
+  strategy = "rolling"

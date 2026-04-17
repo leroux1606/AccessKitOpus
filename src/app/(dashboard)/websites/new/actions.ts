@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Standard } from "@prisma/client";
 import { assertSafeFetchUrl, SsrfError } from "@/lib/ssrf-guard";
+import { canManageWebsites } from "@/lib/permissions";
 
 interface AddWebsiteInput {
   organizationId: string;
@@ -30,7 +31,7 @@ export async function addWebsite(
   });
 
   if (!membership) return { error: "Not authorized" };
-  if (!["OWNER", "ADMIN", "MEMBER"].includes(membership.role)) {
+  if (!canManageWebsites(membership.role)) {
     return { error: "Not authorized" };
   }
 

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canConfigureOrg } from "@/lib/permissions";
 import { CreditCard, Key, Palette, Bell, Webhook, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -73,7 +74,7 @@ export default async function SettingsPage() {
           </div>
           <OrgRenameForm
             currentName={org.name}
-            canEdit={membership.role === "OWNER" || membership.role === "ADMIN"}
+            canEdit={canConfigureOrg(membership.role)}
           />
         </CardContent>
       </Card>

@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
 import { getPlanLimits, isUnlimited } from "@/lib/plans";
+import { canManageTeam } from "@/lib/permissions";
 import { Role } from "@prisma/client";
 
 async function getOrgAndRole() {
@@ -20,7 +21,7 @@ async function getOrgAndRole() {
 export async function inviteTeamMember(formData: FormData) {
   const { membership, org, userId } = await getOrgAndRole();
 
-  if (membership.role !== "OWNER" && membership.role !== "ADMIN") {
+  if (!canManageTeam(membership.role)) {
     return { error: "Only owners and admins can invite team members." };
   }
 
@@ -31,6 +32,9 @@ export async function inviteTeamMember(formData: FormData) {
     return { error: "Please enter a valid email address." };
   }
 
+  // Validate the *invitee's* role against the allowed list. This isn't a hierarchical
+  // permission check — OWNER is excluded (only the creator can hold OWNER) and
+  // CLIENT_VIEWER is granted via the client-portal flow, not team invitations.
   if (!["ADMIN", "MEMBER"].includes(role)) {
     return { error: "Invalid role." };
   }
@@ -134,7 +138,7 @@ export async function inviteTeamMember(formData: FormData) {
 export async function revokeInvitation(invitationId: string) {
   const { membership, org } = await getOrgAndRole();
 
-  if (membership.role !== "OWNER" && membership.role !== "ADMIN") {
+  if (!canManageTeam(membership.role)) {
     return { error: "Only owners and admins can revoke invitations." };
   }
 
@@ -149,7 +153,7 @@ export async function revokeInvitation(invitationId: string) {
 export async function removeMember(membershipId: string) {
   const { membership, org, userId } = await getOrgAndRole();
 
-  if (membership.role !== "OWNER" && membership.role !== "ADMIN") {
+  if (!canManageTeam(membership.role)) {
     return { error: "Only owners and admins can remove team members." };
   }
 

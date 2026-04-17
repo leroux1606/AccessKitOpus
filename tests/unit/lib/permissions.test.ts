@@ -60,9 +60,12 @@ describe("canManageTeam", () => {
 // ─── canManageBilling ─────────────────────────────────────────────────────────
 
 describe("canManageBilling", () => {
-  it("allows only OWNER", () => {
+  it("allows OWNER and ADMIN", () => {
     expect(canManageBilling("OWNER")).toBe(true);
-    expect(canManageBilling("ADMIN")).toBe(false);
+    expect(canManageBilling("ADMIN")).toBe(true);
+  });
+
+  it("denies MEMBER and CLIENT_VIEWER", () => {
     expect(canManageBilling("MEMBER")).toBe(false);
     expect(canManageBilling("CLIENT_VIEWER")).toBe(false);
   });

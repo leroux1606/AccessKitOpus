@@ -3,6 +3,7 @@ import { randomBytes, createHash } from "crypto";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canConfigureOrg } from "@/lib/permissions";
 
 /** Create a new API key */
 export async function POST(req: NextRequest) {
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
   }
 
   const membership = await getActiveMembership(session.user.id);
-  if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!membership || !canConfigureOrg(membership.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -64,7 +65,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   const membership = await getActiveMembership(session.user.id);
-  if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!membership || !canConfigureOrg(membership.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

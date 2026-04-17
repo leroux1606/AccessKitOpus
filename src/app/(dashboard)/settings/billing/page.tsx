@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canManageBilling } from "@/lib/permissions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ export default async function BillingPage() {
 
   const org = membership.organization;
   const limits = getPlanLimits(org.plan);
-  const isAdmin = membership.role === "OWNER" || membership.role === "ADMIN";
+  const isAdmin = canManageBilling(membership.role);
   const prices = PLAN_PRICES[org.plan as keyof typeof PLAN_PRICES];
 
   const [websiteCount, teamCount] = await Promise.all([

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canManageBilling } from "@/lib/permissions";
 import { initializeTransaction, createCustomer } from "@/lib/paystack";
 import { PlanType } from "@prisma/client";
 
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
   }
 
   const membership = await getActiveMembership(session.user.id);
-  if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!membership || !canManageBilling(membership.role)) {
     return NextResponse.json({ error: "No admin access" }, { status: 403 });
   }
 

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canManageWebsites, canConfigureOrg } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,9 +34,9 @@ export default async function WebsiteSettingsPage({ params }: SettingsPageProps)
 
   if (!website) notFound();
 
-  const canManage = ["OWNER", "ADMIN", "MEMBER"].includes(membership.role);
+  const canManage = canManageWebsites(membership.role);
   // Delete is a destructive, non-recoverable action — restrict to OWNER/ADMIN
-  const canDelete = ["OWNER", "ADMIN"].includes(membership.role);
+  const canDelete = canConfigureOrg(membership.role);
 
   return (
     <div className="space-y-6 max-w-xl">

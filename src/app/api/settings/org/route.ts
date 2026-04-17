@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canConfigureOrg } from "@/lib/permissions";
 
 export async function PATCH(req: NextRequest) {
   const session = await auth();
@@ -10,7 +11,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const membership = await getActiveMembership(session.user.id);
-  if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!membership || !canConfigureOrg(membership.role)) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 

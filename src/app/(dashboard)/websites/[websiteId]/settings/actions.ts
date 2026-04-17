@@ -6,6 +6,7 @@ import { Standard, ScanFrequency } from "@prisma/client";
 import { getPlanLimits } from "@/lib/plans";
 import { calculateNextRunAt } from "@/lib/scan-schedule";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canManageWebsites, canConfigureOrg } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 
 interface UpdateWebsiteSettingsInput {
@@ -26,7 +27,7 @@ export async function updateWebsiteSettings(
   const membership = await getActiveMembership(session.user.id);
 
   if (!membership) return { error: "Not authorized" };
-  if (!["OWNER", "ADMIN", "MEMBER"].includes(membership.role)) {
+  if (!canManageWebsites(membership.role)) {
     return { error: "Not authorized" };
   }
 
@@ -103,14 +104,10 @@ export async function deleteWebsite(websiteId: string): Promise<{ error?: string
 
   const membership = await getActiveMembership(session.user.id);
 
-  // Only OWNER and ADMIN may perform destructive deletes
+  // Only OWNER and ADMIN may perform destructive deletes; MEMBER can only update settings.
   if (!membership) return { error: "Not authorized" };
-  if (!["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!canConfigureOrg(membership.role)) {
     return { error: "Only owners and admins can delete websites" };
-  }
-  // Only OWNER and ADMIN may delete websites; MEMBER can only update settings
-  if (!["OWNER", "ADMIN"].includes(membership.role)) {
-    return { error: "Not authorized" };
   }
 
   const website = await db.website.findUnique({

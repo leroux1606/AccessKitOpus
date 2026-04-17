@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
+import { canConfigureOrg } from "@/lib/permissions";
 import { WebhookEvent } from "@prisma/client";
 import { randomBytes } from "crypto";
 
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
   }
 
   const membership = await getActiveMembership(session.user.id);
-  if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!membership || !canConfigureOrg(membership.role)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -106,7 +107,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const membership = await getActiveMembership(session.user.id);
-  if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!membership || !canConfigureOrg(membership.role)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -148,7 +149,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   const membership = await getActiveMembership(session.user.id);
-  if (!membership || !["OWNER", "ADMIN"].includes(membership.role)) {
+  if (!membership || !canConfigureOrg(membership.role)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
