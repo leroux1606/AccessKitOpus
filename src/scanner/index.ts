@@ -45,25 +45,31 @@ export async function runScan(
       rawPages.push(...results);
     }
 
-    // 2b. Run pa11y in parallel for additional coverage (best-effort)
-    try {
-      const pa11yResults = await Promise.all(
-        urls.slice(0, Math.min(urls.length, 5)).map((url) => scanPageWithPa11y(url, websiteOrigin)),
-      );
+    // 2b. Run pa11y for additional coverage. pa11y spawns its own headless
+    // Chromium via puppeteer, so each parallel call adds ~300 MB of RSS on
+    // top of the Playwright browser we already have open. That doubling
+    // is what OOMs 1 GB workers. We therefore:
+    //   1. Make it opt-in behind SCANNER_ENABLE_PA11Y (off by default).
+    //   2. Run the URLs serially instead of via Promise.all so peak memory
+    //      is bounded to one extra Chromium at a time.
+    //   3. Cap the number of URLs at 3 (down from 5).
+    if (process.env.SCANNER_ENABLE_PA11Y === "true") {
+      const pa11yUrls = urls.slice(0, Math.min(urls.length, 3));
+      for (const url of pa11yUrls) {
+        try {
+          const pa11yPage = await scanPageWithPa11y(url, websiteOrigin);
+          const matchingPage = rawPages.find((p) => p.url === pa11yPage.url);
+          if (!matchingPage) continue;
 
-      // Merge pa11y violations into axe results, deduplicating by fingerprint
-      for (const pa11yPage of pa11yResults) {
-        const matchingPage = rawPages.find((p) => p.url === pa11yPage.url);
-        if (!matchingPage) continue;
-
-        const existingFingerprints = new Set(matchingPage.violations.map((v) => v.fingerprint));
-        const newViolations = pa11yPage.violations.filter(
-          (v: ScanViolation) => !existingFingerprints.has(v.fingerprint),
-        );
-        matchingPage.violations.push(...newViolations);
+          const existingFingerprints = new Set(matchingPage.violations.map((v) => v.fingerprint));
+          const newViolations = pa11yPage.violations.filter(
+            (v: ScanViolation) => !existingFingerprints.has(v.fingerprint),
+          );
+          matchingPage.violations.push(...newViolations);
+        } catch {
+          // pa11y is supplementary — don't fail the scan if it errors
+        }
       }
-    } catch {
-      // pa11y is supplementary — don't fail the scan if it errors
     }
 
     // 3. Add per-page scores

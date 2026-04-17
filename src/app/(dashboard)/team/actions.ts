@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
-import { getPlanLimits } from "@/lib/plans";
+import { getPlanLimits, isUnlimited } from "@/lib/plans";
 import { Role } from "@prisma/client";
 
 async function getOrgAndRole() {
@@ -44,7 +44,7 @@ export async function inviteTeamMember(formData: FormData) {
     }),
   ]);
 
-  if (limits.teamSeats !== Infinity && memberCount + pendingCount >= limits.teamSeats) {
+  if (!isUnlimited(limits.teamSeats) && memberCount + pendingCount >= limits.teamSeats) {
     return {
       error: `Your ${org.plan.charAt(0) + org.plan.slice(1).toLowerCase()} plan allows ${limits.teamSeats} seat${limits.teamSeats === 1 ? "" : "s"}. Upgrade to add more team members.`,
       upgradeRequired: true,

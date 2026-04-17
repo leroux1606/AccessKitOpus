@@ -83,14 +83,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { getPlanLimits } = await import("@/lib/plans");
+  const { getPlanLimits, isUnlimited } = await import("@/lib/plans");
   const limits = getPlanLimits(website.organization.plan);
 
   const scan = await db.scan.create({
     data: {
       websiteId,
       status: "QUEUED",
-      pageLimit: limits.pagesPerScan === Infinity ? 10000 : limits.pagesPerScan,
+      pageLimit: isUnlimited(limits.pagesPerScan) ? 10000 : limits.pagesPerScan,
       triggeredBy: "API",
     },
   });

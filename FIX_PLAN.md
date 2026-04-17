@@ -78,28 +78,31 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 - [x] **G4.** CSP report-only → enforced
   *CSP remains in enforcement mode and now pipes violations to a new `/api/csp-report` endpoint via both legacy `report-uri` and the modern `Reporting-Endpoints` / `report-to` header pair. The endpoint accepts `application/csp-report` and `application/reports+json`, caps payloads at 8 KB, rate-limits to 60 reports/min per IP, and logs a structured summary line for each violation.*
 
-## Phase H — Scanner reliability / infra (P1)
+## Phase H — Scanner reliability / infra (P1) 🚧 PARTIAL
 
-- [ ] **H1.** Scanner deploy target decision
+- [ ] **H1.** Scanner deploy target decision ← needs infra sign-off
   *Playwright + Chromium + pa11y do not fit reliably in a 1 GB Lambda. Recommend a dedicated worker (Fly.io Machines, Railway, Render) for `scanWebsiteJob`. No code change — a deploy-topology decision is needed first.*
-- [ ] **H2.** `axe.min.js` path resolution is `cwd`-dependent
-  *`readFileSync(resolve(process.cwd(), "node_modules/..."))` breaks in serverless builds where cwd is `/var/task`. Use `require.resolve` + `__dirname` instead.*
-- [ ] **H3.** pa11y parallel Chromium doubles memory
-  *Currently spawns its own headless Chrome alongside the Playwright instance. Either reuse the Playwright browser, cap pa11y to serial, or make it opt-in.*
+- [x] **H2.** `axe.min.js` path resolution is `cwd`-independent
+  *Switched to `createRequire(import.meta.url)` + `require.resolve("axe-core/axe.min.js")`. Works in any Node cwd (Lambda `/var/task`, PM2, Fly.io) and survives pnpm hoisting / workspace layouts. No more hardcoded `node_modules` path.*
+- [x] **H3.** pa11y parallel Chromium no longer doubles memory
+  *Now opt-in behind `SCANNER_ENABLE_PA11Y=true` (off by default), and when enabled runs URLs **serially** rather than via `Promise.all`. Cap also reduced from 5 to 3 URLs. Peak memory overhead drops from ~5× Chromium to ~1× when enabled, and 0 when disabled.*
 
-## Phase I — Advertised features that are stubbed (P1)
+## Phase I — Advertised features that are stubbed (P1) 🚧 PARTIAL
 
-- [ ] **I1.** Wire `generateAiFixSuggestion` into the scan pipeline (or remove the "AI fixes" plan-limit + marketing copy)
-- [ ] **I2.** Cloudflare R2 screenshot storage — currently a stub; scans don't save screenshots
-- [ ] **I3.** CI/CD integrations (GitHub Action, CLI) — plan-gated UI exists but no backing implementation
+- [x] **I1.** `generateAiFixSuggestion` wired into the scan pipeline
+  *Added a `generate-ai-fixes` Inngest step that runs after `save-results`. For orgs on a plan with `hasAiFixes` (Agency+), it selects up to 15 CRITICAL/SERIOUS violations per scan and generates Anthropic fix suggestions with a concurrency cap of 3 to respect rate limits. Skips silently when `ANTHROPIC_API_KEY` is unset, when plan doesn't include AI fixes, or when a violation already has a cached suggestion. The existing lazy per-view generation in the issue detail page still functions as a fallback.*
+- [ ] **I2.** Cloudflare R2 screenshot storage — currently a stub
+  *`src/scanner/screenshot.ts` returns `null` until `@aws-sdk/client-s3` is installed (requires user sign-off per the `Don't install packages unless asked` rule). Needs: R2 bucket env vars, presigned upload flow, and a `screenshotUrl` column on `Page`.*
+- [ ] **I3.** CI/CD integrations (GitHub Action, CLI) — REST API already works, branded artifacts still pending
+  *`POST /api/v1/scans` is implemented and authenticated via Bearer API keys, so any CI system can invoke it today. What's still missing is (a) an official GitHub Action repo that wraps the curl call, (b) a branded CLI binary, (c) a sample `.github/workflows/accessibility.yml`. Those live in separate repos.*
 
-## Phase J — Code quality / follow-ups (P2)
+## Phase J — Code quality / follow-ups (P2) 🚧 PARTIAL
 
 - [ ] **J1.** Adopt `permissions.ts` helpers (`hasRole`, `canManageTeam`, …) across server actions + API routes
   *Today most sites hardcode `["OWNER","ADMIN"].includes(role)`. Centralizing role policy reduces drift.*
-- [ ] **J2.** Resolve unused / dead code flagged by audit
-  *E.g. `PaystackPlan` interface was removed; confirm no other dead exports linger.*
-- [ ] **J3.** Audit server-action imports — remove remaining unused `db` imports after multi-org refactor*
+- [x] **J2.** Clean up residual `Infinity` comparisons post-C3
+  *Five remaining `=== Infinity` / `!== Infinity` callsites (team seat limit, billing usage card, competitor manager, `/api/v1/scans` pageLimit, team page) now use the `isUnlimited()` helper from `@/lib/plans`. Keeps the `UNLIMITED` sentinel policy consistent everywhere.*
+- [ ] **J3.** Audit server-action imports — remove remaining unused `db` imports after multi-org refactor
 
 ## Phase K — Scanning accuracy & recommendations (P2)
 
@@ -129,14 +132,14 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 ## Continue from here
 
-**Next up:** ▶ **H1 — Scanner deploy target decision** (non-code — needs infra/product sign-off before any `H2`/`H3` code changes land)
+**Next up:** ▶ **H1 — Scanner deploy target decision** (non-code; needs infra sign-off) · then **I2 — R2 screenshot upload** (needs `@aws-sdk/client-s3` install approval) · then **J1 — adopt `permissions.ts` helpers**.
 
 When resuming:
 1. Read this file top-to-bottom to recover context.
-2. Jump to the first `[ ]` item (currently **H1**).
+2. Jump to the first `[ ]` item.
 3. After shipping each item: update its checkbox, run `pnpm type-check && pnpm lint && pnpm test`, and pause for user sign-off before starting the next.
 
-**Current verification status (post-Phase G):** `pnpm type-check` ✅ · `pnpm lint` ✅ · `pnpm test` ✅ (189/189 pass)
+**Current verification status (post-H2/H3/I1/J2):** `pnpm type-check` ✅ · `pnpm lint` ✅ · `pnpm test` ✅ (189/189 pass)
 
 **How the phases are ordered:**
 G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J/K (quality) → L (tests) → M (competitive features).

@@ -1,10 +1,16 @@
 import { readFileSync } from "fs";
-import { resolve } from "path";
+import { createRequire } from "module";
 import type { Browser } from "playwright";
 import { AxeBuilder } from "@axe-core/playwright";
 
-// Use the browser-compatible bundle — the CJS build fails in page context
-const axeSource = readFileSync(resolve(process.cwd(), "node_modules/axe-core/axe.min.js"), "utf8");
+// Resolve axe-core's browser-compatible bundle relative to THIS module,
+// not `process.cwd()`. In serverless runtimes (Lambda, Vercel, Fly.io
+// Machines) the working directory is rarely the repo root, so a
+// `resolve(process.cwd(), ...)` call blows up at runtime even though
+// the file exists on disk. Using `require.resolve` also lets pnpm /
+// hoisting / workspace layouts Just Work without a hardcoded path.
+const nodeRequire = createRequire(import.meta.url);
+const axeSource = readFileSync(nodeRequire.resolve("axe-core/axe.min.js"), "utf8");
 import type { ScanViolation, PageScanResult } from "@/types/scan";
 import {
   mapAxeImpactToSeverity,

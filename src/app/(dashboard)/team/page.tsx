@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { InviteForm } from "@/components/dashboard/invite-form";
 import { PendingInvitations } from "@/components/dashboard/pending-invitations";
 import { MemberList } from "@/components/dashboard/member-list";
-import { getPlanLimits, PLAN_NAMES } from "@/lib/plans";
+import { getPlanLimits, isUnlimited, PLAN_NAMES } from "@/lib/plans";
 
 export const metadata = { title: "Team" };
 
@@ -40,7 +40,7 @@ export default async function TeamPage() {
 
   const totalOccupied = members.length + pendingInvitations.length;
   const seatLimitReached =
-    limits.teamSeats !== Infinity && totalOccupied >= limits.teamSeats;
+    !isUnlimited(limits.teamSeats) && totalOccupied >= limits.teamSeats;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -49,7 +49,7 @@ export default async function TeamPage() {
           <h1 className="text-2xl font-bold tracking-tight">Team</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {members.length} member{members.length !== 1 ? "s" : ""}
-            {limits.teamSeats !== Infinity && (
+            {!isUnlimited(limits.teamSeats) && (
               <span> · {limits.teamSeats} seat{limits.teamSeats !== 1 ? "s" : ""} on {PLAN_NAMES[org.plan]}</span>
             )}
           </p>

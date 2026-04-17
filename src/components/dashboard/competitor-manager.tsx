@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, Scan, Globe } from "lucide-react";
+import { isUnlimited } from "@/lib/plans";
 
 interface Competitor {
   id: string;
@@ -80,7 +81,7 @@ export function CompetitorManager({ competitors: initial, competitorLimit, canAd
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Manage Competitors</CardTitle>
           <span className="text-xs text-muted-foreground">
-            {competitors.length}/{competitorLimit === Infinity ? "Unlimited" : competitorLimit}
+            {competitors.length}/{isUnlimited(competitorLimit) ? "Unlimited" : competitorLimit}
           </span>
         </div>
       </CardHeader>

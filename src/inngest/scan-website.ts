@@ -1,7 +1,14 @@
 import { inngest } from "./client";
 import { db } from "@/lib/db";
 import { runScan } from "@/scanner";
+import { generateAiFixSuggestion } from "@/lib/ai";
+import { getPlanLimits } from "@/lib/plans";
 import type { ScanEventData } from "@/types/scan";
+
+/** How many issues to AI-annotate per scan (cap cost + latency). */
+const AI_FIX_MAX_PER_SCAN = 15;
+/** Concurrent Anthropic calls — keep low to respect rate limits. */
+const AI_FIX_CONCURRENCY = 3;
 
 export const scanWebsiteJob = inngest.createFunction(
   {
@@ -172,7 +179,62 @@ export const scanWebsiteJob = inngest.createFunction(
       });
     });
 
-    // Step 4: Fire scan/completed event for notification handlers
+    // Step 4: Generate AI fix suggestions for CRITICAL/SERIOUS issues on
+    // plans that include `hasAiFixes`. Lazy per-view generation is still
+    // available as a fallback (see the issue detail page), but generating
+    // up front here makes reports/PDFs/API responses immediately rich,
+    // and avoids a per-user-view cold-path Anthropic call. Capped to
+    // AI_FIX_MAX_PER_SCAN new violations per scan to bound cost.
+    await step.run("generate-ai-fixes", async () => {
+      const scan = await db.scan.findUnique({
+        where: { id: scanId },
+        select: { website: { select: { organization: { select: { plan: true } } } } },
+      });
+      const plan = scan?.website?.organization?.plan;
+      if (!plan) return;
+      if (!getPlanLimits(plan).hasAiFixes) return;
+      if (!process.env.ANTHROPIC_API_KEY) return;
+
+      const targets = await db.violation.findMany({
+        where: {
+          scanId,
+          severity: { in: ["CRITICAL", "SERIOUS"] },
+          aiFixSuggestion: null,
+        },
+        orderBy: [{ severity: "asc" }, { firstDetectedAt: "desc" }],
+        take: AI_FIX_MAX_PER_SCAN,
+        select: {
+          id: true,
+          ruleId: true,
+          description: true,
+          htmlElement: true,
+          helpText: true,
+          fixSuggestion: true,
+        },
+      });
+
+      for (let i = 0; i < targets.length; i += AI_FIX_CONCURRENCY) {
+        const batch = targets.slice(i, i + AI_FIX_CONCURRENCY);
+        await Promise.all(
+          batch.map(async (v) => {
+            const suggestion = await generateAiFixSuggestion({
+              ruleId: v.ruleId,
+              description: v.description,
+              htmlElement: v.htmlElement ?? "",
+              helpText: v.helpText ?? "",
+              templateFix: v.fixSuggestion ?? undefined,
+            });
+            if (!suggestion) return;
+            await db.violation.update({
+              where: { id: v.id },
+              data: { aiFixSuggestion: suggestion },
+            });
+          }),
+        );
+      }
+    });
+
+    // Step 5: Fire scan/completed event for notification handlers
     await step.run("fire-completed-event", async () => {
       await inngest.send({
         name: "scan/completed",

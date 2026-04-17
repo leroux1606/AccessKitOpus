@@ -5,7 +5,7 @@ import { getActiveMembership } from "@/lib/get-active-org";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PLAN_NAMES, PLAN_PRICES, getPlanLimits } from "@/lib/plans";
+import { PLAN_NAMES, PLAN_PRICES, getPlanLimits, isUnlimited } from "@/lib/plans";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowLeft, AlertTriangle, CheckCircle2 } from "lucide-react";
@@ -111,17 +111,17 @@ export default async function BillingPage() {
               {
                 label: "Websites",
                 used: websiteCount,
-                limit: limits.websites === Infinity ? "∞" : limits.websites,
+                limit: isUnlimited(limits.websites) ? "∞" : limits.websites,
               },
               {
                 label: "Team seats",
                 used: teamCount,
-                limit: limits.teamSeats === Infinity ? "∞" : limits.teamSeats,
+                limit: isUnlimited(limits.teamSeats) ? "∞" : limits.teamSeats,
               },
               {
                 label: "Pages/scan",
                 used: null,
-                limit: limits.pagesPerScan === Infinity ? "∞" : limits.pagesPerScan,
+                limit: isUnlimited(limits.pagesPerScan) ? "∞" : limits.pagesPerScan,
               },
             ].map((stat) => (
               <div key={stat.label} className="rounded-lg bg-muted p-3">
