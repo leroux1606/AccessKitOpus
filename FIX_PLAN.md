@@ -226,12 +226,52 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
   **Verification (post-K):** `pnpm type-check` ✅ · `pnpm test` ✅ (240/240 pass, up from 205) · `pnpm lint` ⚠ pre-existing `@rushstack/eslint-patch` vs ESLint 9 incompatibility (unchanged from Phase J baseline).
 
-## Phase L — Testing (P2)
+## Phase L — Testing (P2) ✅ COMPLETED
 
-- [ ] **L1.** Integration tests for auth routes (sign-in, magic-link, portal-auth)
-- [ ] **L2.** Integration tests for multi-org switching + cookie-respecting `getActiveMembership`
-- [ ] **L3.** Scanner end-to-end test against a known fixture HTML
-- [ ] **L4.** Playwright E2E for critical UI flows (add website → verify → scan → view issue → comment)
+- [x] **L1.** Integration tests for auth routes (portal-auth + magic-link)
+
+  *Portal-auth route (`POST /api/portal/[slug]/auth`).* `tests/unit/api/portal-auth.test.ts` mocks `@/lib/db`, `@/lib/rate-limiter`, and `next/server` at the module boundary so the route handler runs in a plain Jest env with no real Postgres. 13 cases cover: happy-path cookie issuance (httpOnly + sameSite=lax + scoped path + correct max-age); 401 on wrong password with no cookie leakage; 404 for disabled / missing / hashless portal; 400 on non-JSON / missing / non-string password; 429 with `Retry-After` when rate-limited; rate-limit key wiring (slug + first `x-forwarded-for` entry, `x-real-ip` fallback, `"unknown"` final fallback); and NODE_ENV→`secure` cookie gating.
+
+  *Magic-link refactor + tests.* `src/lib/auth.ts` grew to 100+ lines of inline Resend logic that was impossible to unit-test. Extracted three pure helpers into `src/lib/auth-magic-link.ts`:
+    - `logMagicLinkForDev(identifier, url, env, logger)` — the dev-only console print, guaranteed silent when `NODE_ENV === "production"` (locks in Phase A2 fix).
+    - `buildMagicLinkEmail(url)` — the HTML body.
+    - `sendVerificationRequest({ identifier, url }, deps)` — the full flow with dependency-injectable Resend loader + env + logger so tests never need the real SDK.
+
+  `tests/unit/lib/auth-magic-link.test.ts` — 10 cases: dev + test envs log the link; production is silent (exact-string check against the token so a future "debug-only" escape hatch can't sneak in); email contains url in both `href` and visible text plus a 24-hour expiry mention; Resend send happy path + from-address fallback; Resend import failure and send rejection both swallow without throwing and log an error; production still never logs the magic link even on success.
+
+- [x] **L2.** Integration tests for multi-org switching + cookie-respecting resolver
+
+  *`getActiveMembership`.* `tests/unit/lib/get-active-org.test.ts` — 6 cases mocking `next/headers` cookies + `@/lib/db`: cookie match returns the right org with a single DB round-trip; absent cookie falls back to oldest membership via `orderBy: { createdAt: "asc" }`; stale cookie (user no longer belongs to the cookied org) falls through to the oldest membership in exactly two calls; zero-org users resolve to `null`; single-org users make exactly one DB call regardless of cookie state; the `organization` relation is included on both lookup paths.
+
+  *`POST /api/switch-org`.* `tests/unit/api/switch-org.test.ts` — 6 cases: happy-path cookie issuance with 90-day maxAge / httpOnly / sameSite=lax / path=/; 401 for no session; 401 for a session missing `user.id`; 400 when `orgId` body field is missing; 403 when the user is not a member of the requested org (no cookie written); no cookie written when the membership check throws (failure contains itself, no partial-state).
+
+- [x] **L3.** Scanner end-to-end test against a known fixture HTML
+
+  *Fixture.* `tests/fixtures/accessibility/known-violations.html` — a deliberately-broken page seeded with seven representative violations: missing `lang` on `<html>`, `<img>` without alt, unlabelled `<input>`, empty-text `<button>`, low-contrast paragraph, duplicate `id`, empty-text `<a>`. Every violation is annotated with its WCAG criterion + axe rule id in a header comment so future contributors know not to "fix" them.
+
+  *Runner.* `tests/e2e/scanner-fixture.spec.ts` — new Playwright project (`scanner-fixture`) that:
+    1. Spins up an ephemeral `node:http` server on a random port in `beforeAll`, serves the fixture, tears down in `afterAll`.
+    2. Uses the already-installed `@axe-core/playwright` to run axe against the served URL with the exact tag set our scanner emits (`standardsToAxeTags(["WCAG22_AA"])`).
+    3. Asserts six named violations are detected (image-alt, label, button-name, color-contrast, html-has-lang, link-name) with per-rule error messages so a regression points to the exact missing rule.
+    4. Exercises every pure helper (`mapAxeViolationToSeverity`, `mapTagsToCategory`, `mapTagsToStandards`, `extractWcagCriterion`, `extractWcagLevel`) against the *real* axe output, verifying each produces a well-formed downstream shape.
+    5. Scans the page twice and asserts `generateFingerprint` produces byte-identical outputs across runs — the Phase K2 stability guarantee against real-world selector noise.
+    6. Asserts `normalizeSelector` never leaks ordinal pseudo-classes or bracket-index selectors into normalized output for any real axe hit.
+
+  *Why a new Playwright project, not a Jest test.* `src/scanner/axe-scanner.ts` uses `createRequire(import.meta.url)` which `ts-jest`'s CJS compilation can't resolve. Playwright loads TS through its own transformer with ESM support and already ships a real Chromium (the whole point of the scanner), so reusing its runner is the minimum-friction way to test the scanner pipeline end-to-end. The project entry has no `dependencies` on auth setup and doesn't navigate to `baseURL`, so it's fully self-contained.
+
+  *Timing.* All 4 test cases pass in ~10s each against the seeded fixture on a dev laptop.
+
+- [x] **L4.** Playwright E2E for the critical UI flow (add → verify → scan → view issue → comment)
+
+  *`tests/e2e/critical-flows.spec.ts`* — two-part spec registered under the existing `authenticated` Playwright project so it inherits the `global-setup.spec.ts` session cookie.
+
+  **Part 1 — read-only smoke (runs always).** Four cases cover the deep-route wiring without needing any seed data: unknown website id, unknown settings, unknown issue id, unknown scans list. All four must return <500 and not bounce to `/login` — catches any auth-leak or crash in `notFound()` paths that a missing-row regression would introduce.
+
+  **Part 2 — full write-path chain (opt-in via `E2E_WRITE_TESTS=true`).** One monolithic test with `test.step` segments for: add website, settings/verification panel renders (all three verification method tabs), trigger scan and see `role=status` update, wait up to 3 min for the issues list to populate (exponential-ish poll intervals 5s → 10s → 15s), open the first issue and confirm the comment textbox is present, submit a comment and assert it renders in the thread. Per-step timeouts keep failures localized — Playwright's report shows exactly which seam broke.
+
+  *Config touch.* `playwright.config.ts` — the existing `authenticated` project's `testMatch` is widened from a hardcoded filename to a regex (`/(dashboard|critical-flows)\.spec\.ts$/`) so both specs run under the authenticated project without duplicating the auth-setup dependency. New `scanner-fixture` project is added for L3 with no setup dependency (it serves its own HTTP fixture) and isn't gated on the Next.js dev server either.
+
+  **Verification (post-L):** `pnpm type-check` ✅ · `pnpm test` ✅ (275/275 Jest, up from 240; +35 new integration cases) · `npx playwright test --project=scanner-fixture` ✅ (4/4 pass) · `pnpm lint` ⚠ pre-existing `@rushstack/eslint-patch` vs ESLint 9 incompatibility (unchanged from Phase J baseline).
 
 ## Phase M — Product competitiveness (P3)
 
@@ -247,8 +287,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
 **Next up (all remaining items are new scope):**
 
-1. ▶ **Phase L — integration & E2E tests** (auth routes, multi-org switching, scanner fixture, Playwright UI flows).
-2. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
+1. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
 
 **Deploy / publish follow-ups (no code — require external accounts):**
 - **H1 (Fly.io):** `fly launch` → `fly secrets set` → `fly deploy`, then unset `RUN_SCANS_IN_NEXT` on the web tier. Runbook: `worker/README.md`.
@@ -260,9 +299,9 @@ When resuming:
 2. Jump to the first `[ ]` item that doesn't require external sign-off.
 3. After shipping each item: update its checkbox, run `pnpm type-check && pnpm lint && pnpm test`, and pause for user sign-off before starting the next.
 
-**Current verification status (post-K):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (240/240 pass) · CLI smoke tests ✅ (`--version`, `--help`, usage errors all return correct exit codes)
+**Current verification status (post-L):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (275/275 pass) · `npx playwright test --project=scanner-fixture` ✅ (4/4 pass) · CLI smoke tests ✅ (`--version`, `--help`, usage errors all return correct exit codes)
 
 **How the phases are ordered:**
 G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J (quality) → K (scanning accuracy) → L (tests) → M (competitive features).
 
-With Phases G, H, I, J, and K fully green, **every P0/P1/P2 item from the original audit + scanning-accuracy follow-up is now shipped**. Everything left is either broader test authoring (L) or new competitive product work (M).
+With Phases G, H, I, J, K, and L fully green, **every P0/P1/P2 item from the original audit is now shipped — plus the scanning-accuracy follow-up and the integration/E2E test authoring that was deferred earlier**. Everything left in the plan is new competitive product work (M).

@@ -5,6 +5,7 @@ import GitHub from "next-auth/providers/github";
 import Resend from "next-auth/providers/resend";
 import { db } from "@/lib/db";
 import { slugify } from "@/lib/utils";
+import { sendVerificationRequest } from "@/lib/auth-magic-link";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
@@ -21,29 +22,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Resend({
       apiKey: process.env.RESEND_API_KEY,
       from: process.env.EMAIL_FROM ?? "noreply@accesskit.app",
-      async sendVerificationRequest({ identifier, url }) {
-        // Log to console ONLY in development — never in production, where
-        // anyone with log access could sign in as any user.
-        if (process.env.NODE_ENV !== "production") {
-          console.log("\n========================================");
-          console.log("MAGIC LINK FOR:", identifier);
-          console.log(url);
-          console.log("========================================\n");
-        }
-
-        try {
-          const { Resend: ResendClient } = await import("resend");
-          const resend = new ResendClient(process.env.RESEND_API_KEY ?? "");
-          await resend.emails.send({
-            from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
-            to: identifier,
-            subject: "Sign in to AccessKit",
-            html: `<p>Click to sign in: <a href="${url}">${url}</a></p><p>This link expires in 24 hours.</p>`,
-          });
-        } catch (err) {
-          console.error("Email send failed (use the console link above):", err);
-        }
-      },
+      sendVerificationRequest,
     }),
   ],
   session: {

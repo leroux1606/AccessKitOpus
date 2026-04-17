@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+  <!--
+    Deliberately broken page used by tests/e2e/scanner-fixture.spec.ts to
+    prove the scanner pipeline detects a representative spread of issues.
+    Do not "fix" any violations here — each one is a test fixture.
+
+    Known violations (WCAG 2.x):
+      • html element has no lang attribute            (3.1.1  html-has-lang)
+      • <img> without alt                             (1.1.1  image-alt)
+      • <input> with no label                         (3.3.2/4.1.2  label)
+      • <button> with no accessible name              (4.1.2  button-name)
+      • Low-contrast text                             (1.4.3  color-contrast)
+      • Duplicate id                                  (4.1.1  duplicate-id-active / duplicate-id)
+      • <a> without discernible text                  (2.4.4/4.1.2  link-name)
+  -->
+  <head>
+    <meta charset="utf-8" />
+    <title>Known violations fixture</title>
+    <style>
+      body { font: 14px sans-serif; padding: 1rem; }
+      .low-contrast { color: #bbb; background: #fff; }
+    </style>
+  </head>
+  <body>
+    <h1>Scanner fixture</h1>
+
+    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" />
+
+    <form>
+      <input type="text" id="email-field" />
+      <button></button>
+    </form>
+
+    <p class="low-contrast">This grey-on-white text is below the 4.5:1 WCAG AA contrast minimum.</p>
+
+    <div id="email-field"></div>
+
+    <a href="/next"></a>
+  </body>
+</html>

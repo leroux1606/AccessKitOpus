@@ -52,10 +52,17 @@ export default defineConfig({
       testMatch: "**/public.spec.ts",
     },
 
+    // Scanner fixture — self-contained (serves its own HTML on a random
+    // port); does not depend on the Next.js dev server or auth state.
+    {
+      name: "scanner-fixture",
+      testMatch: "**/scanner-fixture.spec.ts",
+    },
+
     // Authenticated pages — depend on the setup project
     {
       name: "authenticated",
-      testMatch: "**/dashboard.spec.ts",
+      testMatch: /(dashboard|critical-flows)\.spec\.ts$/,
       dependencies: ["setup"],
       use: {
         storageState: "tests/e2e/.auth/user.json",
