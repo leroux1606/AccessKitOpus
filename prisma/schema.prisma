@@ -246,6 +246,7 @@ model Website {
   scanFrequency      ScanFrequency       @default(MANUAL)
   standards          Standard[]
   isCompetitor       Boolean             @default(false)
+  publicBadgeEnabled Boolean             @default(false)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 

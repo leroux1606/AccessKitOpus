@@ -98,6 +98,42 @@ export async function updateWebsiteSettings(
   return {};
 }
 
+/**
+ * Toggle the public SVG score badge for a website.
+ *
+ * When enabled, GET /api/badges/{websiteId}/score.svg returns the current
+ * accessibility score as a public shields.io-style badge that can be embedded
+ * in READMEs, blog posts, and client websites. Disabled by default — opt-in
+ * so owners don't accidentally publish a low-score badge.
+ */
+export async function setPublicBadgeEnabled(
+  websiteId: string,
+  enabled: boolean,
+): Promise<{ error?: string }> {
+  const session = await auth();
+  if (!session?.user) return { error: "Not authenticated" };
+
+  const membership = await getActiveMembership(session.user.id);
+  if (!membership) return { error: "Not authorized" };
+  if (!canManageWebsites(membership.role)) {
+    return { error: "Not authorized" };
+  }
+
+  const website = await db.website.findUnique({
+    where: { id: websiteId, organizationId: membership.organizationId },
+    select: { id: true },
+  });
+  if (!website) return { error: "Website not found" };
+
+  await db.website.update({
+    where: { id: websiteId },
+    data: { publicBadgeEnabled: enabled },
+  });
+
+  revalidatePath(`/websites/${websiteId}/settings`);
+  return {};
+}
+
 export async function deleteWebsite(websiteId: string): Promise<{ error?: string }> {
   const session = await auth();
   if (!session?.user) return { error: "Not authenticated" };

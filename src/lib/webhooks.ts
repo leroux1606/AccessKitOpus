@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { WebhookEvent } from "@prisma/client";
 import { createHmac } from "crypto";
+import { formatForProvider } from "@/lib/webhook-formatters";
 
 const MAX_RETRIES = 3;
 const TIMEOUT_MS = 10_000;
@@ -24,8 +25,34 @@ export async function deliverWebhookEvent(
 
   const results: Array<{ webhookId: string; success: boolean }> = [];
 
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.NEXTAUTH_URL ??
+    process.env.APP_URL ??
+    undefined;
+
   for (const webhook of webhooks) {
-    const body = JSON.stringify({ event, data: payload, timestamp: new Date().toISOString() });
+    // Generic envelope for custom listeners — unchanged contract.
+    const genericEnvelope: Record<string, unknown> = {
+      event,
+      data: payload,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Slack / Teams get native schemas so messages render correctly in-channel.
+    const { provider, body: formattedBody } = formatForProvider({
+      url: webhook.url,
+      event,
+      payload,
+      baseUrl,
+      genericPayload: genericEnvelope,
+    });
+
+    const body = JSON.stringify(formattedBody);
+    // HMAC always signs what we ultimately put on the wire (generic or
+    // native), so receivers that care about provenance still have a stable
+    // contract. Slack/Teams themselves don't verify this header but the
+    // signature is harmless there.
     const signature = createHmac("sha256", webhook.secret).update(body).digest("hex");
 
     let success = false;
@@ -45,6 +72,7 @@ export async function deliverWebhookEvent(
             "Content-Type": "application/json",
             "X-AccessKit-Signature": `sha256=${signature}`,
             "X-AccessKit-Event": event,
+            "X-AccessKit-Provider": provider,
           },
           body,
           signal: controller.signal,

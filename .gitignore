@@ -48,3 +48,6 @@ prisma/migrations/
 
 
 
+
+.git-commit-msg.tmp
+

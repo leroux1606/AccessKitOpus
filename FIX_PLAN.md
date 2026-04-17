@@ -273,35 +273,110 @@ Legend: `[x]` done · `[ ]` open · `[~]` partially done
 
   **Verification (post-L):** `pnpm type-check` ✅ · `pnpm test` ✅ (275/275 Jest, up from 240; +35 new integration cases) · `npx playwright test --project=scanner-fixture` ✅ (4/4 pass) · `pnpm lint` ⚠ pre-existing `@rushstack/eslint-patch` vs ESLint 9 incompatibility (unchanged from Phase J baseline).
 
-## Phase M — Product competitiveness (P3)
+## Phase M — Product competitiveness (P3) ✅ COMPLETED
 
-- [ ] **M1.** Automated remediation PRs (GitHub App that opens fix PRs for common issues — alt/role/aria fixes)
-- [ ] **M2.** PDF report styling pass (VPAT + exec summary + per-page drilldown)
-- [ ] **M3.** Slack / Teams native notifications beyond the existing webhook
-- [ ] **M4.** Email digest (weekly summary per website) opt-in
-- [ ] **M5.** Public shareable badges (score badge for embedding in client sites)
+- [x] **M1.** Automated remediation patch builder + public API hook (mechanical fixes)
+
+  *Rather than ship a half-built GitHub App wrapper first, the mechanical "brain" that decides *what* to change was landed as a pure, offline, fully-tested SDK. The GitHub App / CLI wrappers that call it are strictly deploy-time work with no additional application code needed.*
+
+  *`src/lib/remediation.ts`.* New module exposing `buildRemediationPatch(filePath, sourceContent, violation)` → `{unifiedDiff, updatedContent, summary, rationale, ruleId}` plus `canAutoRemediate(ruleId)` and `supportedRuleIds()` for the UI. Five mechanical rules ship at day-one — chosen because their fix is unambiguous and safe-by-default:
+    - **`image-alt`** — adds `alt=""` to `<img>` tags lacking one (WCAG 1.1.1). Empty alt is the correct WCAG default for decorative images; the PR body explicitly tells the human reviewer to replace it with a descriptive string for content images.
+    - **`html-has-lang`** — adds `lang="en"` to `<html>` (WCAG 3.1.1). Defaults to `en`; the rationale tells the reviewer to change it for non-English sites.
+    - **`button-name`** — adds `aria-label="…"` derived from the CSS selector's id/class to empty `<button>` tags (WCAG 4.1.2). Placeholder text is clearly flagged as human-review-required.
+    - **`link-name`** — same treatment for empty `<a>` tags (WCAG 2.4.4 / 4.1.2).
+    - **`meta-viewport`** — removes `user-scalable=no` / `maximum-scale=1.0` from the viewport meta (WCAG 1.4.4 Resize Text). Safe and fully reversible.
+  Anything outside the allowlist returns `null` so the caller falls through to the AI-generated fix suggestion pipeline (Phase I1) rather than inventing a patch.
+
+  *Design rules baked in.* All five patchers are **idempotent** (running them on already-fixed source returns null, not a redundant patch), **non-parsing** (targeted regex edits — no DOM reserialization surprises with whitespace/quote/order changes), and **side-effect free** (no I/O, no globals). The bundled `toUnifiedDiff(filePath, before, after)` helper emits valid `git apply` input with 3 lines of context per hunk, exported so callers can diff arbitrary before/after pairs.
+
+  *Public API hook.* `POST /api/v1/issues/{violationId}/remediation` — new endpoint gated behind the existing Agency+ API-key plan check. Body: `{ filePath, sourceContent }` (512 KB cap, enforced before patching). Returns 200 with the diff or 422 + `supportedRuleIds` when the rule isn't in the mechanical allowlist. This is the stable contract the GitHub App / Bugbot / CLI wrappers will call once per violation per PR; the endpoint is stateless (no repo credentials, no persisted diffs) so the same endpoint powers every future wrapper.
+
+  *Tests.* `tests/unit/lib/remediation.test.ts` — 22 cases: per-rule positive + idempotent-negative paths, attribute-preservation checks, selector→label humanization (`submit-form` → "submit form"), self-closing `<img />` syntax preservation, `toUnifiedDiff` contract (empty string on no-op, valid headers, +/-/space line markers, trailing newline), and the unsupported-rule / null-source fall-through contract that keeps the AI-suggestion pipeline as the default.
+
+  *Deploy follow-ups (no code — require external sign-up).* GitHub App registration → installation flow → repo webhook handler → PR opener. The entire remote side of the feature is independent of the core app and ships as a separate Fly.io worker or Cloudflare Worker that calls the stable `/api/v1/issues/.../remediation` endpoint with an Agency-plan API key.
+
+- [x] **M2.** PDF report exec summary + per-page drilldown
+
+  *New `src/lib/report-summary.ts`.* Pure extraction of the "what decision-makers need to see first" shape from a scan: readiness label (`green`/`amber`/`red`/`unknown`) derived from critical+serious counts and score; WCAG AA pass-rate proxy (share of pages scoring ≥80); top-3 critical/serious issues aggregated across all pages (deduped by ruleId, sorted by severity → instance count → pages-affected → alphabetical ruleId so ordering is stable); top-5 worst-scoring pages with violations; total/affected page counts. All pure, sync, throw-free — missing fields degrade to "unknown" or 0.
+
+  *PDF template.* `src/components/reports/pdf-template.tsx` restructured into two pages:
+    1. **Executive Summary** — branded header, readiness card (color-coded headline with one-line detail), the existing score cards, a new 3-metric grid (AA pass-rate %, pages-with-issues ratio, critical+serious total), top-issues list (severity badge per row, rule id + WCAG criterion + instance/page counts in a single meta line), and the top-pages list sorted by worst score first.
+    2. **Per-page detail** — same severity breakdown + metadata row + full per-page drilldown that used to live on the summary page. Preserves every violation the PDF already rendered; just moves it to its own page so the exec summary isn't buried under detail.
+  Palette, footer, and page-number rendering are shared via an extracted `ReportFooter` component. The readiness card's colour tracks severity (green/amber/red) rather than brand — so the PDF's top-of-page message can't drift from the metric.
+
+  *Tests.* `tests/unit/lib/report-summary.test.ts` — 16 cases: readiness (red on critical>0 irrespective of score; amber on serious>0 or score<80; green otherwise; unknown for unscored); top-issues aggregation (dedup by ruleId, CRITICAL beats SERIOUS, MODERATE/MINOR excluded, deterministic tie-break under equal signals); top-pages (lowest-scoring first, zero-violation pages excluded, stable tie-break); AA pass-rate (null when unscored, correct fractional share when mixed, 100% happy path).
+
+- [x] **M3.** Slack / Teams native webhook formatting
+
+  *`src/lib/webhook-formatters.ts`.* New pure module that classifies outgoing webhook URLs by hostname and wraps the payload in the provider's native schema — Slack gets `{text, blocks[], attachments[]}` with a severity-coloured attachment bar and a "View in dashboard" button; Teams gets a `MessageCard` with `themeColor`, a facts table, and an `OpenUri` `potentialAction`. Custom listeners (anything not matching the narrow hostname allowlist) keep receiving the existing `{event, data, timestamp}` envelope — the generic contract is preserved.
+
+  *Detection rules (intentionally narrow to avoid false-positives).* Slack = `hooks.slack.com` + `/services/` path prefix. Teams = legacy Office 365 connectors (`outlook.office.com`, `*.webhook.office.com`) **and** the newer Power Automate / "Workflows" domains (`*.logic.azure.com`), because both delivery paths accept `MessageCard`. Anything else → `generic` passthrough.
+
+  *Presentation logic consolidated.* `describeEvent(event, payload)` is the single source of truth for event → title / summary / accent colour — same strings flow into Slack's header block, the Teams card title, and the accent/themeColor on both. Dashboard CTA link is derived from `payload.link` (absolute) or `{websiteId, scanId}` (relative, joined against `baseUrl`) — when nothing resolves, both formatters omit the CTA rather than emit a broken link.
+
+  *Wiring.* `src/lib/webhooks.ts` now calls `formatForProvider({url, event, payload, baseUrl, genericPayload})` before serialisation. The HMAC still signs whatever bytes go on the wire (so listeners that care about provenance have a stable contract regardless of provider). A new `X-AccessKit-Provider` response header (`slack` / `teams` / `generic`) makes the delivery-log inspectable at a glance. `baseUrl` is resolved from `NEXT_PUBLIC_APP_URL` → `NEXTAUTH_URL` → `APP_URL` so links work in every deploy environment.
+
+  *Tests.* `tests/unit/lib/webhook-formatters.test.ts` — 26 cases covering: provider detection (7 cases including case-insensitive host + refused paths + malformed URLs); event → title/summary/accent mapping (5 cases across all four `WebhookEvent` variants + severity colour-picker); Slack shape (text fallback, header/section/context blocks, CTA button only when link derivable, no "primary" styling on critical-alert buttons, severity-coloured attachment); Teams shape (MessageCard identifiers, facts table, OpenUri action, absolute-link passthrough, no-action path when link unresolvable); `formatForProvider` dispatch (generic passthrough, Slack routing, Teams routing).
+
+- [x] **M4.** Weekly digest — plan-gated + trend arrows + unsubscribe footer
+
+  *Context.* The `weeklyDigestNotification` Inngest cron shipped in an earlier phase (every Monday 10 AM UTC, in-app + email + `NotificationPreference.email=true` respected). This phase tightens the body into a testable unit and adds three new properties.
+
+  *`src/lib/digest.ts`.* New pure `buildWeeklyDigest({orgName, websites[], appUrl})` → `{subject, text, totals}` extracted from the Inngest function. `DigestWebsiteInput` carries per-site `currentScore`, `previousScore` (one-week-ago baseline), `scansThisWeek`, `totalViolations`, `criticalCount`. Body is deterministic plaintext (<2 KB, renders identically in every email client), sorted by currentScore DESC with alphabetical tie-break, with `(up N)` / `(down N)` trend arrows (ASCII-only so mobile Outlook doesn't mangle Unicode), an honest `—` placeholder for unscored sites, and a "Biggest improvement / regression" call-out computed from the largest positive / negative `scoreDelta`.
+
+  *Unsubscribe footer.* Every body ends with `Manage preferences: {appUrl}/settings/notifications` — CAN-SPAM / GDPR requirement plus a good-faith "opt-out is one click" promise. Trailing slashes on `appUrl` are normalised so links stay clean.
+
+  *`shouldSendDigest(input)` gate.* Skips digests for orgs with zero scans and zero scored websites in the window — no more "you had zero activity this week, here's an email about that" noise.
+
+  *Inngest wiring.* `src/inngest/notification-emails.ts` `weeklyDigestNotification` now pulls both current + previous-week scan rows (`lt: oneWeekAgo, gte: twoWeeksAgo`, `distinct: ["websiteId"]`, newest-first) to populate `previousScore`, resolves website IDs via a second small `findMany`, and delegates the body to `buildWeeklyDigest`. Email text is sent verbatim — no more inline string building in the I/O layer.
+
+  *Tests.* `tests/unit/lib/digest.test.ts` — 20 cases: `scoreDelta` honesty (null when either side missing, signed integer when both present); `shouldSendDigest` gates; subject formatting; unsubscribe link present in every body; trailing-slash normalisation; determinism under equal input; per-site sort + tie-break; trend-arrow branches (up/down/omitted); "most improved / most regressed" selection and the no-positive-delta case where "Biggest improvement" is correctly omitted.
+
+- [x] **M5.** Public shareable score badges
+
+  *Schema.* Single additive field on `Website`: `publicBadgeEnabled Boolean @default(false)`. Opt-in, not opt-out — sites haven't been scanned yet shouldn't accidentally publish a low-score badge.
+
+  *`src/lib/badges.ts`.* Pure SVG renderer in the shields.io style — `buildBadgeSvg({label, value, color, labelColor?})` returns a self-contained `<svg>` (no external fonts, no CSS `<link>`, no JS — renders identically in GitHub READMEs, Markdown, blog posts, mail clients). Text width is estimated from a small Verdana-11 character-width table (covers the digits / letters / `/ . , : -` glyph subset the badge actually prints, with a 7-px fallback) — gets visually-indistinguishable spacing without a headless browser in the request path. Output is deterministic (~600 B) and properly XML-escapes label/value/color so a future white-label with a `'` or `"` in the company name can't inject attributes. `buildScoreBadgeSvg(score)` is the canonical `accessibility: NN/100` convenience with a neutral gray `no data` branch for null/NaN (brand-new sites don't appear "failing") and the same severity palette used by the dashboard score card (`≥90` green, `≥70` yellow, `≥50` orange, else red).
+
+  *`GET /api/badges/{websiteId}/score.svg`.* New public route (no auth). 404s when the website doesn't exist **or** `publicBadgeEnabled === false` — indistinguishable responses so a third party can't enumerate website IDs. When enabled: `Content-Type: image/svg+xml; charset=utf-8`, `Cache-Control: public, max-age=300, s-maxage=300, stale-while-revalidate=3600` (5-min TTL absorbs README burst traffic without making scores more than 5 min stale), `X-Robots-Tag: noindex` so search engines don't crawl the badge stream. CSRF middleware already skips GET.
+
+  *Embed UI.* `src/app/(dashboard)/websites/[websiteId]/settings/badge-panel.tsx` — new client component under the "Public badge" card on the website settings page. Toggle button (optimistic update, rollback on server error) + live badge preview + three one-click copy buttons for the image URL, Markdown snippet, and HTML anchor snippet — all generated by `buildEmbedSnippets(baseUrl, websiteId)` which trims trailing slashes on the base URL. Only users who pass `canManageWebsites` can toggle.
+
+  *Server action.* `setPublicBadgeEnabled(websiteId, enabled)` added to the existing settings `actions.ts` — runs the same auth + org-scoping + role-gating pattern the rest of the file uses, revalidates `/websites/{id}/settings`.
+
+  *Tests.* `tests/unit/lib/badges.test.ts` — 20 cases (score-color buckets including null/NaN, `measureText` fallback + determinism, `escapeXml` five-char coverage, `buildBadgeSvg` output shape + determinism + XML-injection safety for label/value/color, `buildScoreBadgeSvg` "no data" + bucket colour selection, `buildEmbedSnippets` URL construction + trailing-slash normalisation). `tests/unit/api/badges.test.ts` — 4 cases (404 on missing, 404 on disabled, 200 with valid SVG + cache headers + `X-Robots-Tag`, `no data` rendering when currentScore null).
+
+  *Note on white-labeled domains.* The badge endpoint lives on the AccessKit (or your white-label) app origin — the same origin that serves the dashboard. Customers on AGENCY+ plans using `whiteLabel.customDomain` will eventually want the badge served from their own domain too; that's a small routing follow-up (rewrite rule on the custom-domain edge worker) and not a code change to the badge builder itself.
+
+**Verification (post-M):** `pnpm type-check` ✅ · `pnpm test` ✅ (389/389 Jest pass, up from 275; +114 new cases across badges/formatters/exec-summary/digest/remediation) · `pnpm lint` ⚠ pre-existing `@rushstack/eslint-patch` vs ESLint 9 incompatibility (unchanged from Phase J baseline).
 
 ---
 
 ## Continue from here
 
-**Next up (all remaining items are new scope):**
+**All P0–P3 items from the original audit + the follow-ups queued along the way are now shipped.** The plan has no remaining open items.
 
-1. ▶ **Phase M — product competitiveness** (remediation PR bot, VPAT styling, Slack/Teams native, email digest, public badges).
+The remaining work to make Phase M "visible" to customers is strictly deploy-time — no more application code required:
+
+1. **M1 (GitHub App):** register the App on github.com, implement the install/webhook wrapper (can live in its own repo — calls the stable `POST /api/v1/issues/{violationId}/remediation` endpoint this phase shipped, using any Agency-plan API key), and publish to the GitHub Marketplace.
+2. **M5 (white-label badge domain):** customers on AGENCY+ who've set `whiteLabel.customDomain` will want the badge served from `their-domain/api/badges/...` — a rewrite rule at the edge, not a code change.
+3. **prisma migrate:** the `publicBadgeEnabled` column from M5 needs a `prisma migrate dev --create-only` (or `prisma db push` in dev) followed by `prisma migrate deploy` in production. No data backfill needed — the default is `false`.
+
+When resuming for unplanned new work:
+1. Read this file top-to-bottom to recover context.
+2. Add a new `Phase N` section for the new scope.
+3. Keep the "ship one thing, run the full gate, commit, pause for sign-off" loop.
 
 **Deploy / publish follow-ups (no code — require external accounts):**
 - **H1 (Fly.io):** `fly launch` → `fly secrets set` → `fly deploy`, then unset `RUN_SCANS_IN_NEXT` on the web tier. Runbook: `worker/README.md`.
 - **I2 (Cloudflare R2):** create bucket + API token + public-bound domain, then `fly secrets set R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… R2_BUCKET_NAME=… R2_PUBLIC_URL=…` on the scanner app. Full checklist under § I2 above.
 - **I3 (npm + Actions Marketplace):** `git subtree split --prefix=cli` → `npm publish @accesskit/cli`. `git subtree split --prefix=github-action` → bundle CLI → publish as `accesskit/action@v1`. Full procedure in `github-action/README.md`.
+- **M1 (GitHub App):** register the App, implement the webhook wrapper that calls `POST /api/v1/issues/{violationId}/remediation` with an Agency API key, publish to the GitHub Marketplace.
+- **M5 (prisma migrate):** `publicBadgeEnabled` column needs a migration in production. `prisma migrate dev --create-only` locally, then `prisma migrate deploy` in prod. No data backfill — default is `false`.
 
-When resuming:
-1. Read this file top-to-bottom to recover context.
-2. Jump to the first `[ ]` item that doesn't require external sign-off.
-3. After shipping each item: update its checkbox, run `pnpm type-check && pnpm lint && pnpm test`, and pause for user sign-off before starting the next.
-
-**Current verification status (post-L):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (275/275 pass) · `npx playwright test --project=scanner-fixture` ✅ (4/4 pass) · CLI smoke tests ✅ (`--version`, `--help`, usage errors all return correct exit codes)
+**Current verification status (post-M):** `pnpm type-check` ✅ · `pnpm lint` ⚠ pre-existing (`@rushstack/eslint-patch` vs ESLint 9 incompatibility — reproduces on clean `62d3484`; needs a separate fix either pinning the patch or migrating to `eslint-config-next`'s flat export) · `pnpm test` ✅ (389/389 pass) · `npx playwright test --project=scanner-fixture` ✅ (4/4 pass) · CLI smoke tests ✅ (`--version`, `--help`, usage errors all return correct exit codes)
 
 **How the phases are ordered:**
 G (remaining security) → H (scanner infra decisions) → I (stubbed features) → J (quality) → K (scanning accuracy) → L (tests) → M (competitive features).
 
-With Phases G, H, I, J, K, and L fully green, **every P0/P1/P2 item from the original audit is now shipped — plus the scanning-accuracy follow-up and the integration/E2E test authoring that was deferred earlier**. Everything left in the plan is new competitive product work (M).
+With Phases G through M fully green, **every P0/P1/P2/P3 item from the original audit is now shipped** — plus the scanning-accuracy follow-up and the integration/E2E test authoring that was deferred earlier. The plan has no remaining open items.

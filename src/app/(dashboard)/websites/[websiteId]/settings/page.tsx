@@ -11,7 +11,9 @@ import { ArrowLeft, ShieldCheck, AlertTriangle } from "lucide-react";
 import { VerificationPanel } from "./verification-panel";
 import { WebsiteSettingsForm } from "./website-settings-form";
 import { DeleteWebsiteButton } from "./delete-website-button";
+import { BadgePanel } from "./badge-panel";
 import { ScanButton } from "@/components/dashboard/scan-button";
+import { buildEmbedSnippets } from "@/lib/badges";
 
 export const metadata = { title: "Website Settings" };
 
@@ -110,6 +112,29 @@ export default async function WebsiteSettingsPage({ params }: SettingsPageProps)
             currentScheduledHour={website.scanSchedule?.scheduledHour ?? 9}
             currentScheduledDay={website.scanSchedule?.scheduledDay ?? null}
             orgPlan={membership.organization.plan}
+            canManage={canManage}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Public badge */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Public badge</CardTitle>
+          <CardDescription>
+            Embed your accessibility score in a README or on your live site.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <BadgePanel
+            websiteId={website.id}
+            initialEnabled={website.publicBadgeEnabled}
+            snippets={buildEmbedSnippets(
+              process.env.NEXT_PUBLIC_APP_URL ??
+                process.env.NEXTAUTH_URL ??
+                "https://app.accesskit.io",
+              website.id,
+            )}
             canManage={canManage}
           />
         </CardContent>

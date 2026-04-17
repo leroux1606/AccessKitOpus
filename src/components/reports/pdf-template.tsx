@@ -6,6 +6,7 @@ import {
   View,
   StyleSheet,
 } from "@react-pdf/renderer";
+import { buildExecSummary, type ExecutiveSummary } from "@/lib/report-summary";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -305,6 +306,106 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 4,
   },
+  // Exec summary
+  readinessCard: {
+    padding: 14,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+  },
+  readinessLabel: {
+    fontSize: 10,
+    fontFamily: "Helvetica-Bold",
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  readinessHeadline: {
+    fontSize: 16,
+    fontFamily: "Helvetica-Bold",
+    marginBottom: 4,
+  },
+  readinessDetail: {
+    fontSize: 10,
+    color: "#1F2937",
+  },
+  execGrid: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 16,
+  },
+  execMetricCard: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 8,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  execMetricLabel: {
+    fontSize: 8,
+    color: "#6B7280",
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  execMetricValue: {
+    fontSize: 22,
+    fontFamily: "Helvetica-Bold",
+    color: "#1F2937",
+  },
+  execMetricSub: {
+    fontSize: 8,
+    color: "#9CA3AF",
+    marginTop: 2,
+  },
+  topIssueRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+    gap: 10,
+  },
+  topIssueRank: {
+    fontSize: 14,
+    fontFamily: "Helvetica-Bold",
+    color: "#9CA3AF",
+    width: 24,
+  },
+  topIssueContent: {
+    flex: 1,
+  },
+  topIssueTitle: {
+    fontSize: 10,
+    fontFamily: "Helvetica-Bold",
+    color: "#1F2937",
+    marginBottom: 2,
+  },
+  topIssueMeta: {
+    fontSize: 8,
+    color: "#6B7280",
+  },
+  topPageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  topPageUrl: {
+    fontSize: 9,
+    color: "#1F2937",
+    flex: 1,
+    marginRight: 12,
+  },
+  topPageScore: {
+    fontSize: 10,
+    fontFamily: "Helvetica-Bold",
+  },
   // Footer
   footer: {
     position: "absolute",
@@ -340,6 +441,23 @@ function severityColor(severity: string): string {
     case "MODERATE": return colors.moderate;
     case "MINOR": return colors.minor;
     default: return "#9CA3AF";
+  }
+}
+
+function readinessPalette(readiness: ExecutiveSummary["readiness"]): {
+  bg: string;
+  border: string;
+  text: string;
+} {
+  switch (readiness) {
+    case "green":
+      return { bg: "#F0FDF4", border: "#22C55E", text: "#166534" };
+    case "amber":
+      return { bg: "#FFFBEB", border: "#EAB308", text: "#854D0E" };
+    case "red":
+      return { bg: "#FEF2F2", border: "#EF4444", text: "#991B1B" };
+    default:
+      return { bg: "#F9FAFB", border: "#D1D5DB", text: "#374151" };
   }
 }
 
@@ -453,10 +571,135 @@ function PageSection({ page }: { page: PageData }) {
   );
 }
 
+// ─── Executive Summary Section ──────────────────────────────────────────────
+
+function ReadinessCard({ summary }: { summary: ExecutiveSummary }) {
+  const palette = readinessPalette(summary.readiness);
+  return (
+    <View
+      style={{
+        ...styles.readinessCard,
+        backgroundColor: palette.bg,
+        borderColor: palette.border,
+      }}
+    >
+      <Text style={{ ...styles.readinessLabel, color: palette.text }}>Readiness</Text>
+      <Text style={{ ...styles.readinessHeadline, color: palette.text }}>
+        {summary.readinessLabel}
+      </Text>
+      <Text style={styles.readinessDetail}>{summary.readinessDetail}</Text>
+    </View>
+  );
+}
+
+function ExecMetrics({
+  summary,
+  data,
+}: {
+  summary: ExecutiveSummary;
+  data: ScanReportData;
+}) {
+  const passRate = summary.wcagAAPassRate;
+  return (
+    <View style={styles.execGrid}>
+      <View style={styles.execMetricCard}>
+        <Text style={styles.execMetricLabel}>Pages passing AA</Text>
+        <Text style={styles.execMetricValue}>
+          {passRate === null ? "—" : `${passRate}%`}
+        </Text>
+        <Text style={styles.execMetricSub}>score ≥ 80</Text>
+      </View>
+      <View style={styles.execMetricCard}>
+        <Text style={styles.execMetricLabel}>Pages with issues</Text>
+        <Text style={styles.execMetricValue}>
+          {summary.pagesWithIssues} / {summary.pagesScanned}
+        </Text>
+        <Text style={styles.execMetricSub}>of pages scanned</Text>
+      </View>
+      <View style={styles.execMetricCard}>
+        <Text style={styles.execMetricLabel}>Critical + serious</Text>
+        <Text style={{ ...styles.execMetricValue, color: data.criticalCount + data.seriousCount > 0 ? colors.critical : colors.success }}>
+          {data.criticalCount + data.seriousCount}
+        </Text>
+        <Text style={styles.execMetricSub}>blocking issues</Text>
+      </View>
+    </View>
+  );
+}
+
+function TopIssuesList({ summary }: { summary: ExecutiveSummary }) {
+  if (summary.topIssues.length === 0) {
+    return (
+      <Text style={{ fontSize: 10, color: "#6B7280", marginBottom: 16 }}>
+        No critical or serious issues detected — well done.
+      </Text>
+    );
+  }
+  return (
+    <View style={{ ...styles.pageCard, marginBottom: 16 }}>
+      {summary.topIssues.map((issue, i) => (
+        <View key={issue.ruleId} style={styles.topIssueRow} wrap={false}>
+          <Text style={styles.topIssueRank}>{i + 1}.</Text>
+          <View style={styles.topIssueContent}>
+            <Text style={styles.topIssueTitle}>{issue.description}</Text>
+            <Text style={styles.topIssueMeta}>
+              {issue.ruleId}
+              {issue.wcagCriterion ? ` · WCAG ${issue.wcagCriterion}` : ""}
+              {issue.wcagLevel ? ` (Level ${issue.wcagLevel})` : ""}
+              {" · "}
+              {issue.instances} instance{issue.instances === 1 ? "" : "s"} on {issue.pagesAffected} page{issue.pagesAffected === 1 ? "" : "s"}
+            </Text>
+          </View>
+          <View
+            style={{
+              ...styles.violationBadge,
+              backgroundColor: severityColor(issue.severity),
+            }}
+          >
+            <Text style={styles.violationBadgeText}>{issue.severity.toLowerCase()}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function TopPagesList({ summary }: { summary: ExecutiveSummary }) {
+  if (summary.topPages.length === 0) return null;
+  return (
+    <View style={{ ...styles.pageCard, marginBottom: 16 }}>
+      {summary.topPages.map((page) => (
+        <View key={page.url} style={styles.topPageRow} wrap={false}>
+          <Text style={styles.topPageUrl}>{page.title || page.url}</Text>
+          <Text style={{ ...styles.topPageScore, color: scoreColor(page.score) }}>
+            {page.score ?? "—"} · {page.violationCount} issue{page.violationCount === 1 ? "" : "s"}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // ─── Main Document ──────────────────────────────────────────────────────────
+
+function ReportFooter({ data }: { data: ScanReportData }) {
+  return (
+    <View style={styles.footer} fixed>
+      <Text style={styles.footerText}>
+        Generated by {data.whiteLabel?.companyName || "AccessKit"}
+        {!data.whiteLabel?.companyName ? " · accesskit.app" : ""}
+      </Text>
+      <Text
+        style={styles.footerText}
+        render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+      />
+    </View>
+  );
+}
 
 export function ScanReportPDF({ data }: { data: ScanReportData }) {
   const brandName = data.whiteLabel?.companyName || "AccessKit";
+  const summary = buildExecSummary(data);
 
   return (
     <Document
@@ -464,16 +707,41 @@ export function ScanReportPDF({ data }: { data: ScanReportData }) {
       author={brandName}
       subject={`Scan report for ${data.websiteUrl}`}
     >
-      {/* Summary page */}
+      {/* Executive summary page — designed for the one-page read */}
       <Page size="A4" style={styles.page}>
         <ReportHeader data={data} />
 
         <View style={styles.titleSection}>
-          <Text style={styles.title}>Accessibility Report</Text>
+          <Text style={styles.title}>Executive Summary</Text>
           <Text style={styles.subtitle}>{data.websiteName} — {data.websiteUrl}</Text>
         </View>
 
+        <ReadinessCard summary={summary} />
         <ScoreSection data={data} />
+        <ExecMetrics summary={summary} data={data} />
+
+        <Text style={styles.sectionHeading}>Top issues to fix</Text>
+        <TopIssuesList summary={summary} />
+
+        {summary.topPages.length > 0 && (
+          <>
+            <Text style={styles.sectionHeading}>Pages needing attention</Text>
+            <TopPagesList summary={summary} />
+          </>
+        )}
+
+        <ReportFooter data={data} />
+      </Page>
+
+      {/* Full per-page drilldown page(s) */}
+      <Page size="A4" style={styles.page}>
+        <ReportHeader data={data} />
+
+        <View style={styles.titleSection}>
+          <Text style={styles.title}>Per-page detail</Text>
+          <Text style={styles.subtitle}>All violations, grouped by page</Text>
+        </View>
+
         <SeverityBreakdown data={data} />
 
         <View style={styles.metaRow}>
@@ -493,28 +761,16 @@ export function ScanReportPDF({ data }: { data: ScanReportData }) {
           </View>
         </View>
 
-        {/* Issues by page */}
         <Text style={styles.sectionHeading}>Issues by Page</Text>
         {data.pages.length === 0 ? (
           <Text style={{ fontSize: 10, color: "#6B7280" }}>
             No issues found — all pages passed the accessibility checks.
           </Text>
         ) : (
-          data.pages.map((page, i) => (
-            <PageSection key={i} page={page} />
-          ))
+          data.pages.map((page, i) => <PageSection key={i} page={page} />)
         )}
 
-        <View style={styles.footer} fixed>
-          <Text style={styles.footerText}>
-            Generated by {data.whiteLabel?.companyName || "AccessKit"}
-            {!data.whiteLabel?.companyName ? " · accesskit.app" : ""}
-          </Text>
-          <Text
-            style={styles.footerText}
-            render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
-          />
-        </View>
+        <ReportFooter data={data} />
       </Page>
     </Document>
   );

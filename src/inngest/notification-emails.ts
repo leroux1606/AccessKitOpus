@@ -2,6 +2,7 @@ import { inngest } from "./client";
 import { db } from "@/lib/db";
 import { createNotifications, getEmailRecipients } from "@/lib/notifications";
 import { deliverWebhookEvent } from "@/lib/webhooks";
+import { buildWeeklyDigest, shouldSendDigest } from "@/lib/digest";
 
 // ─── Scan Complete ───────────────────────────────────────────────────────────
 
@@ -278,52 +279,92 @@ export const weeklyDigestNotification = inngest.createFunction(
     for (const org of orgs) {
       await step.run(`digest-${org.id}`, async () => {
         const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-        // Gather weekly stats
-        const [scansThisWeek, websites] = await Promise.all([
-          db.scan.count({
-            where: {
-              website: { organizationId: org.id },
-              status: "COMPLETED",
-              completedAt: { gte: oneWeekAgo },
+        // Gather per-website current + previous scores so we can show a trend
+        // arrow against last week's baseline.
+        const websites = await db.website.findMany({
+          where: { organizationId: org.id, isCompetitor: false },
+          select: {
+            name: true,
+            currentScore: true,
+            scans: {
+              where: { status: "COMPLETED", completedAt: { gte: oneWeekAgo } },
+              select: { score: true, totalViolations: true, criticalCount: true },
+              orderBy: { completedAt: "desc" },
+              take: 1,
             },
-          }),
-          db.website.findMany({
-            where: { organizationId: org.id, isCompetitor: false },
-            select: {
-              name: true,
-              currentScore: true,
-              scans: {
-                where: { status: "COMPLETED", completedAt: { gte: oneWeekAgo } },
-                select: { score: true, totalViolations: true, criticalCount: true },
-                orderBy: { completedAt: "desc" },
-                take: 1,
-              },
-            },
-          }),
-        ]);
+          },
+        });
 
-        if (scansThisWeek === 0 && websites.length === 0) return;
+        const scansThisWeekById = await db.scan.groupBy({
+          by: ["websiteId"],
+          where: {
+            website: { organizationId: org.id },
+            status: "COMPLETED",
+            completedAt: { gte: oneWeekAgo },
+          },
+          _count: { _all: true },
+        });
+        const scansByName = new Map<string, number>();
+        for (const row of scansThisWeekById) {
+          // The groupBy gives us websiteId but we already have name-keyed
+          // websites; map through a second query to resolve.
+          scansByName.set(row.websiteId, row._count._all);
+        }
 
-        const totalIssues = websites.reduce(
-          (sum, w) => sum + (w.scans[0]?.totalViolations ?? 0),
-          0,
+        const previousScoresById = await db.scan.findMany({
+          where: {
+            website: { organizationId: org.id },
+            status: "COMPLETED",
+            completedAt: { lt: oneWeekAgo, gte: twoWeeksAgo },
+            score: { not: null },
+          },
+          orderBy: { completedAt: "desc" },
+          distinct: ["websiteId"],
+          select: { websiteId: true, score: true },
+        });
+        const prevByWebsiteId = new Map(
+          previousScoresById.map((s) => [s.websiteId, s.score]),
         );
-        const criticalIssues = websites.reduce(
-          (sum, w) => sum + (w.scans[0]?.criticalCount ?? 0),
-          0,
-        );
 
-        // Build summary lines for each website
-        const siteLines = websites
-          .filter((w) => w.currentScore !== null)
-          .map((w) => `  - ${w.name}: ${w.currentScore}/100`)
-          .join("\n");
+        // We need a website-id-by-name mapping to line the aggregates up.
+        const idNameRows = await db.website.findMany({
+          where: { organizationId: org.id, isCompetitor: false },
+          select: { id: true, name: true },
+        });
+        const idByName = new Map(idNameRows.map((r) => [r.name, r.id]));
 
+        const digestInput = websites.map((w) => {
+          const id = idByName.get(w.name) ?? "";
+          const latestScan = w.scans[0];
+          return {
+            name: w.name,
+            currentScore: w.currentScore,
+            previousScore: prevByWebsiteId.get(id) ?? null,
+            scansThisWeek: scansByName.get(id) ?? 0,
+            totalViolations: latestScan?.totalViolations ?? null,
+            criticalCount: latestScan?.criticalCount ?? null,
+          };
+        });
+
+        const baseUrl =
+          process.env.NEXT_PUBLIC_APP_URL ??
+          process.env.AUTH_URL ??
+          "https://app.accesskit.io";
+
+        const payload = {
+          orgName: org.name,
+          websites: digestInput,
+          appUrl: baseUrl,
+        };
+
+        if (!shouldSendDigest(payload)) return;
+
+        const digest = buildWeeklyDigest(payload);
         const title = `Weekly digest for ${org.name}`;
-        const message = `${scansThisWeek} scans completed this week. ${totalIssues} total issues (${criticalIssues} critical).`;
+        const message = `${digest.totals.scansThisWeek} scans this week. ${digest.totals.totalIssues} total issues (${digest.totals.criticalIssues} critical).`;
 
-        // In-app notification
         await createNotifications({
           organizationId: org.id,
           type: "WEEKLY_DIGEST",
@@ -332,37 +373,19 @@ export const weeklyDigestNotification = inngest.createFunction(
           link: "/dashboard",
         });
 
-        // Email
         const recipients = await getEmailRecipients(org.id, "WEEKLY_DIGEST");
         const resendApiKey = process.env.RESEND_API_KEY;
         if (!resendApiKey || recipients.length === 0) return;
 
         const { Resend } = await import("resend");
         const resend = new Resend(resendApiKey);
-        const baseUrl = process.env.AUTH_URL ?? "https://app.accesskit.io";
-
-        const body = [
-          `Here's your weekly accessibility summary:`,
-          ``,
-          `Scans completed: ${scansThisWeek}`,
-          `Total issues found: ${totalIssues}`,
-          `Critical issues: ${criticalIssues}`,
-          ``,
-          siteLines ? `Website scores:\n${siteLines}` : "",
-          ``,
-          `View dashboard: ${baseUrl}/dashboard`,
-          ``,
-          `— The AccessKit Team`,
-        ]
-          .filter(Boolean)
-          .join("\n");
 
         for (const r of recipients) {
           await resend.emails.send({
             from: process.env.EMAIL_FROM ?? "noreply@accesskit.app",
             to: r.email,
-            subject: `AccessKit Weekly Digest — ${org.name}`,
-            text: `Hi ${r.name ?? "there"},\n\n${body}`,
+            subject: digest.subject,
+            text: digest.text,
           });
           sent++;
         }
