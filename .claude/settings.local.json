@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx:*)",
+      "Bash(npm install:*)",
+      "Bash(npm list:*)",
+      "Bash(npm run:*)",
+      "Bash(node -e \"require\\(''''@auth/core/jwt''''\\); console.log\\(''''ok''''\\)\")",
+      "Bash(npm test:*)",
+      "Bash(ls:*)",
+      "Bash(timeout 90 tail -f \"C:\\\\Users\\\\JAFE1~1.LER\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Private-AI-AccessKit\\\\f61fc1e0-beab-40b9-bce6-4b060b98705b\\\\tasks\\\\bmjg91cf1.output\")",
+      "Bash(git commit:*)",
+      "Bash(ls -la /c/Private/AI/AccessKit/src/app/\\\\\\(dashboard\\\\\\)/)",
+      "Bash(xargs grep:*)",
+      "Bash(ls -la /c/Private/AI/AccessKit/src/app/\\\\\\(auth\\\\\\)/)",
+      "Bash(find /c/Private/AI/AccessKit -maxdepth 2 -name README* -o -name ARCHITECTURE* -o -name PLAN*)",
+      "Bash(find /c/Private/AI/AccessKit -name ACCESSKIT_PLAN* -o -name *PLAN*)",
+      "Bash(grep -n ApiVersion node_modules/stripe/types/*.d.ts)",
+      "Bash(npm ls:*)",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\" C:PrivateAIAccessKitsrc --include=*.ts --include=*.tsx)",
+      "Bash(grep -r \"model Notification\\\\|notification\\\\|email.*template\\\\|template.*email\" /c/Private/AI/AccessKit/prisma /c/Private/AI/AccessKit/src --include=*.ts --include=*.tsx --include=*.prisma)",
+      "Bash(find /c/Private/AI/AccessKit -name page.tsx -o -name middleware.ts -o -name next.config.*)",
+      "Bash(find /c/Private/AI/AccessKit/src -name *screenshot* -o -name *r2* -o -name *upload*)",
+      "Bash(find /c/Private/AI/AccessKit/src -path */api/* -name *issue* -o -path */api/* -name *violation*)",
+      "Bash(find /c/Private/AI/AccessKit/src -type f \\\\\\(-name *doc* -o -name *guide* -o -name *help* \\\\\\))",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); console.log\\('GOOGLE_ID:', process.env.AUTH_GOOGLE_ID ? 'SET \\('+process.env.AUTH_GOOGLE_ID.slice\\(0,8\\)+'...\\)' : 'EMPTY'\\)\")"
+    ]
+  }
+}
