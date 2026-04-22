@@ -152,16 +152,27 @@ export function AddWebsiteForm({ organizationId }: AddWebsiteFormProps) {
         </div>
       </fieldset>
 
-      <Button type="submit" className="w-full" disabled={isPending || selectedStandards.length === 0}>
-        {isPending ? (
-          <>
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
-            Adding website...
-          </>
-        ) : (
-          "Add website"
-        )}
-      </Button>
+      <div className="flex gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          className="flex-1"
+          disabled={isPending}
+          onClick={() => router.push("/websites")}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" className="flex-1" disabled={isPending || selectedStandards.length === 0}>
+          {isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+              Adding website...
+            </>
+          ) : (
+            "Add website"
+          )}
+        </Button>
+      </div>
     </form>
   );
 }

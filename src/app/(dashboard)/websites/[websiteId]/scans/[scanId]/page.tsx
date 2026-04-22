@@ -3,7 +3,7 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getActiveMembership } from "@/lib/get-active-org";
-import { ArrowLeft, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, AlertTriangle, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -68,6 +68,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
       {isActive && (
         <ScanPoller
           scanId={scanId}
+          websiteId={websiteId}
           initialStatus={scan.status}
         />
       )}
@@ -239,6 +240,22 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* Cancelled state */}
+      {scan.status === "CANCELLED" && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Ban className="h-10 w-10 mx-auto mb-3 text-muted-foreground" aria-hidden="true" />
+            <p className="font-medium">Scan cancelled</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              This scan was cancelled before it completed. No results were recorded.
+            </p>
+            <Button variant="outline" size="sm" className="mt-4" asChild>
+              <Link href={`/websites/${websiteId}`}>Back to website</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
@@ -263,6 +280,13 @@ function ScanStatusBadge({ status }: { status: string }) {
       <Badge variant="secondary" className="gap-1.5 animate-pulse">
         <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
         Running
+      </Badge>
+    );
+  if (status === "CANCELLED")
+    return (
+      <Badge variant="secondary" className="gap-1.5">
+        <Ban className="h-3.5 w-3.5" aria-hidden="true" />
+        Cancelled
       </Badge>
     );
   return (

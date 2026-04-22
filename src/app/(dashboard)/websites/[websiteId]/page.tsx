@@ -333,7 +333,7 @@ export default async function WebsitePage({ params }: WebsitePageProps) {
                           : "secondary"
                       }
                     >
-                      {scan.status.toLowerCase()}
+                      {scan.status === "CANCELLED" ? "cancelled" : scan.status.toLowerCase()}
                     </Badge>
                   </div>
                 </li>

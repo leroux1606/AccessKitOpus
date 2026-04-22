@@ -29,7 +29,7 @@ export const dataRetentionJob = inngest.createFunction(
       const result = await db.scan.deleteMany({
         where: {
           createdAt: { lt: scanCutoff },
-          status: { in: ["COMPLETED", "FAILED"] },
+          status: { in: ["COMPLETED", "FAILED", "CANCELLED"] },
         },
       });
       return result.count;

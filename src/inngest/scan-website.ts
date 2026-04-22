@@ -28,7 +28,7 @@ export const scanWebsiteJob = inngest.createFunction(
         where: { id: scanId },
         select: { status: true },
       });
-      if (current?.status === "COMPLETED" || current?.status === "FAILED") return;
+      if (current?.status === "COMPLETED" || current?.status === "FAILED" || current?.status === "CANCELLED") return;
       await db.scan.update({
         where: { id: scanId },
         data: { status: "RUNNING", startedAt: new Date() },
@@ -65,6 +65,10 @@ export const scanWebsiteJob = inngest.createFunction(
       const now = new Date();
 
       await db.$transaction(async (tx) => {
+        // Skip if the scan was cancelled by the user before we could save.
+        const current = await tx.scan.findUnique({ where: { id: scanId }, select: { status: true } });
+        if (current?.status === "CANCELLED" || current?.status === "FAILED") return;
+
         // Wipe any partial results from a previous attempt for this scan.
         // Violations first (they FK to Page); then Pages.
         await tx.violation.deleteMany({ where: { scanId } });
@@ -235,8 +239,11 @@ export const scanWebsiteJob = inngest.createFunction(
       }
     });
 
-    // Step 5: Fire scan/completed event for notification handlers
+    // Step 5: Fire scan/completed event for notification handlers.
+    // Only fire if the scan actually completed — skip for cancelled or failed scans.
     await step.run("fire-completed-event", async () => {
+      const current = await db.scan.findUnique({ where: { id: scanId }, select: { status: true } });
+      if (current?.status !== "COMPLETED") return;
       await inngest.send({
         name: "scan/completed",
         data: { scanId },

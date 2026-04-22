@@ -106,7 +106,7 @@ export default async function ScansPage({ params }: ScansPageProps) {
                             : "secondary"
                         }
                       >
-                        {scan.status.toLowerCase()}
+                        {scan.status === "CANCELLED" ? "cancelled" : scan.status.toLowerCase()}
                       </Badge>
                     </td>
                     <td className="px-6 py-3 hidden md:table-cell text-xs text-muted-foreground capitalize">

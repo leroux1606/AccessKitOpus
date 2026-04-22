@@ -56,6 +56,7 @@ enum ScanStatus {
   RUNNING
   COMPLETED
   FAILED
+  CANCELLED
 }
 
 enum TriggerType {

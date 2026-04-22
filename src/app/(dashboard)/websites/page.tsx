@@ -147,14 +147,6 @@ export default async function WebsitesPage() {
             </Card>
           ))}
 
-          {/* Add another website card */}
-          <Link
-            href="/websites/new"
-            className="rounded-xl border border-dashed border-border/50 bg-card/20 p-5 flex flex-col items-center justify-center gap-2 text-muted-foreground hover:border-primary/30 hover:text-foreground hover:bg-card/40 transition-all min-h-[110px]"
-          >
-            <Plus className="h-5 w-5" aria-hidden="true" />
-            <span className="text-sm font-medium">Add website</span>
-          </Link>
         </div>
       )}
     </div>
