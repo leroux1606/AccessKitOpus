@@ -29,10 +29,18 @@ export async function runScan(
   const { scanId } = options;
 
   const browser = await chromium.launch({ headless: true });
+  // `@axe-core/playwright` opens a blank page in the current BrowserContext
+  // at the end of every `analyze()` call (cross-frame result postprocessing).
+  // Using the `browser.newPage()` shortcut creates an anonymous context that
+  // the blank-page open rejects with "Please use browser.newContext()".
+  // Create one context explicitly and share it across crawl + scan.
+  const context = await browser.newContext({
+    userAgent: "AccessKit-Scanner/1.0",
+  });
 
   try {
     // 1. Discover pages to scan
-    const discovered = await crawlWebsite(websiteUrl, pageLimit, browser);
+    const discovered = await crawlWebsite(websiteUrl, pageLimit, context);
 
     // 1b. SSRF-guard every discovered URL. Sitemaps and anchor hrefs can
     //     point anywhere — including private IPs / cloud metadata endpoints —
@@ -54,7 +62,7 @@ export async function runScan(
     for (let i = 0; i < urls.length; i += CONCURRENCY) {
       const batch = urls.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
-        batch.map((url) => scanPageWithAxe(browser, url, websiteOrigin, standards, scanId)),
+        batch.map((url) => scanPageWithAxe(context, url, websiteOrigin, standards, scanId)),
       );
       rawPages.push(...results);
     }
@@ -119,6 +127,7 @@ export async function runScan(
       duration,
     };
   } finally {
+    await context.close().catch(() => {});
     await browser.close();
   }
 }

@@ -1,4 +1,4 @@
-import type { Browser } from "playwright";
+import type { BrowserContext } from "playwright";
 import { assertSafeFetchUrl } from "@/lib/ssrf-guard";
 import { DEFAULT_LIMITS, fetchWithSizeLimit } from "@/lib/http-limits";
 import { applyPageResourceCap } from "./page-limits";
@@ -140,14 +140,14 @@ async function fetchSitemapUrls(websiteUrl: string): Promise<string[]> {
 
 async function crawlFromHomepage(
   websiteUrl: string,
-  browser: Browser,
+  context: BrowserContext,
   limit: number,
 ): Promise<string[]> {
   const origin = new URL(websiteUrl).origin;
   const visited = new Set<string>();
   const discovered = new Set<string>();
 
-  const page = await browser.newPage();
+  const page = await context.newPage();
   const cap = await applyPageResourceCap(page);
   try {
     await page.goto(websiteUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -183,7 +183,7 @@ async function crawlFromHomepage(
 export async function crawlWebsite(
   websiteUrl: string,
   pageLimit: number,
-  browser: Browser,
+  context: BrowserContext,
 ): Promise<string[]> {
   // Re-validate before any outbound fetch — guards against DNS rebinding
   // between when the website was added and when the scan actually runs.
@@ -205,7 +205,7 @@ export async function crawlWebsite(
 
   if (urls.length === 0) {
     // Fall back to crawling from homepage
-    urls = await crawlFromHomepage(websiteUrl, browser, pageLimit);
+    urls = await crawlFromHomepage(websiteUrl, context, pageLimit);
   } else {
     // Filter by robots.txt and normalize
     const homepageNorm = normalizeUrl(websiteUrl, origin);

@@ -47,6 +47,33 @@ export async function triggerScan(websiteId: string): Promise<void> {
     where: { id: websiteId, organizationId: membership.organizationId },
   });
   if (!website) throw new Error("Website not found");
+  if (!website.verified) throw new Error("Website ownership must be verified before scanning.");
+
+  // Reclaim any stuck scans first, so a crashed dev-fallback (or a worker
+  // that died mid-scan) can't wedge the UI by blocking every subsequent
+  // trigger. A scan is "stuck" when:
+  //   • status=QUEUED and no startedAt after QUEUE_STUCK_MS — the worker
+  //     never picked it up (Inngest dev server not running, `after()` never
+  //     fired, process restarted between redirect and callback, etc.)
+  //   • status=RUNNING but startedAt is older than RUN_STUCK_MS — the
+  //     worker started but died mid-scan; it is never coming back
+  const QUEUE_STUCK_MS = 2 * 60 * 1000; // 2 minutes — dev fallback waits 3 s
+  const RUN_STUCK_MS = 15 * 60 * 1000; // 15 minutes — longer than MAX_POLL_MS
+  const now = Date.now();
+  await db.scan.updateMany({
+    where: {
+      websiteId,
+      OR: [
+        { status: "QUEUED", createdAt: { lt: new Date(now - QUEUE_STUCK_MS) } },
+        { status: "RUNNING", startedAt: { lt: new Date(now - RUN_STUCK_MS) } },
+      ],
+    },
+    data: {
+      status: "FAILED",
+      errorMessage: "Scan did not progress — reclaimed automatically",
+      completedAt: new Date(),
+    },
+  });
 
   // Redirect to existing active scan rather than creating a duplicate
   const runningScan = await db.scan.findFirst({

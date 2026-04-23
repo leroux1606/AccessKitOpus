@@ -51,6 +51,16 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Keep Node-side scanner deps out of the webpack bundle. axe-core exposes
+  // its browser-runnable code as `axe.source`, which it computes via
+  // `axeFunction.toString()`. If webpack wraps the module in its CommonJS
+  // runtime, that `.toString()` leaks the wrapper (e.g. `exports.xxx = …`)
+  // into the string, and Playwright's `page.evaluate` then fails with
+  // `ReferenceError: exports is not defined`. Marking these external makes
+  // Next.js emit plain `require(...)` calls so the real module code is
+  // loaded at runtime, untouched. `playwright` is included because it is a
+  // Node-only native package that shouldn't be bundled regardless.
+  serverExternalPackages: ["axe-core", "@axe-core/playwright", "playwright", "playwright-core"],
   images: {
     remotePatterns: [
       {

@@ -1,16 +1,5 @@
-import { readFileSync } from "fs";
-import { createRequire } from "module";
-import type { Browser } from "playwright";
+import type { BrowserContext } from "playwright";
 import { AxeBuilder } from "@axe-core/playwright";
-
-// Resolve axe-core's browser-compatible bundle relative to THIS module,
-// not `process.cwd()`. In serverless runtimes (Lambda, Vercel, Fly.io
-// Machines) the working directory is rarely the repo root, so a
-// `resolve(process.cwd(), ...)` call blows up at runtime even though
-// the file exists on disk. Using `require.resolve` also lets pnpm /
-// hoisting / workspace layouts Just Work without a hardcoded path.
-const nodeRequire = createRequire(import.meta.url);
-const axeSource = readFileSync(nodeRequire.resolve("axe-core/axe.min.js"), "utf8");
 import type { ScanViolation, PageScanResult } from "@/types/scan";
 import {
   mapAxeViolationToSeverity,
@@ -30,13 +19,13 @@ import {
 } from "./screenshot";
 
 export async function scanPageWithAxe(
-  browser: Browser,
+  context: BrowserContext,
   url: string,
   websiteOrigin: string,
   standards: string[],
   scanId?: string,
 ): Promise<PageScanResult> {
-  const page = await browser.newPage();
+  const page = await context.newPage();
   const startTime = Date.now();
 
   // Cap total page weight so a malicious or accidentally huge response
@@ -55,7 +44,12 @@ export async function scanPageWithAxe(
 
     const axeTags = standardsToAxeTags(standards);
 
-    const results = await new AxeBuilder({ page, axeSource })
+    // Don't pass axeSource — AxeBuilder falls back to axe-core's bundled
+    // `source` export, which is webpack-safe. Passing a manually-read
+    // file path breaks under Next.js bundling because `import.meta.url`
+    // becomes a `webpack-internal://` URL with the route-group segment
+    // (e.g. `(action-browser)`) baked in, which confuses createRequire.
+    const results = await new AxeBuilder({ page })
       .withTags(axeTags)
       .analyze();
 

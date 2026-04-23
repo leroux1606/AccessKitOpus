@@ -13,6 +13,7 @@ import {
   BarChart3,
   Swords,
   BookOpen,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -91,32 +92,42 @@ export function Sidebar() {
           const Icon = item.icon;
 
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={isActive ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                isActive
-                  ? "bg-[hsl(262,83%,68%)]/10 text-[hsl(262,80%,80%)] border border-[hsl(262,83%,68%)]/15"
-                  : "text-sidebar-foreground hover:bg-secondary/50 hover:text-foreground border border-transparent"
-              )}
-            >
-              <Icon
+            <div key={item.href} className="flex items-center gap-1">
+              <Link
+                href={item.href}
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "h-4 w-4 flex-shrink-0",
-                  isActive ? "text-[hsl(262,83%,68%)]" : ""
+                  "flex flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  isActive
+                    ? "bg-[hsl(262,83%,68%)]/10 text-[hsl(262,80%,80%)] border border-[hsl(262,83%,68%)]/15"
+                    : "text-sidebar-foreground hover:bg-secondary/50 hover:text-foreground border border-transparent"
                 )}
-                aria-hidden="true"
-              />
-              <span className="flex-1">{item.label}</span>
-              {item.comingSoon && (
-                <span className="text-[10px] bg-secondary text-muted-foreground px-1.5 py-0.5 rounded font-normal">
-                  Soon
-                </span>
+              >
+                <Icon
+                  className={cn(
+                    "h-4 w-4 flex-shrink-0",
+                    isActive ? "text-[hsl(262,83%,68%)]" : ""
+                  )}
+                  aria-hidden="true"
+                />
+                <span className="flex-1">{item.label}</span>
+                {item.comingSoon && (
+                  <span className="text-[10px] bg-secondary text-muted-foreground px-1.5 py-0.5 rounded font-normal">
+                    Soon
+                  </span>
+                )}
+              </Link>
+              {item.href === "/websites" && (
+                <Link
+                  href="/websites/new"
+                  aria-label="Add website"
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring flex-shrink-0"
+                >
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
               )}
-            </Link>
+            </div>
           );
         })}
       </nav>
