@@ -58,7 +58,7 @@ export async function triggerScan(websiteId: string): Promise<void> {
   //   • status=RUNNING but startedAt is older than RUN_STUCK_MS — the
   //     worker started but died mid-scan; it is never coming back
   const QUEUE_STUCK_MS = 2 * 60 * 1000; // 2 minutes — dev fallback waits 3 s
-  const RUN_STUCK_MS = 15 * 60 * 1000; // 15 minutes — longer than MAX_POLL_MS
+  const RUN_STUCK_MS   = 5 * 60 * 1000; // 5 minutes — real scans finish in <2 min
   const now = Date.now();
   await db.scan.updateMany({
     where: {
