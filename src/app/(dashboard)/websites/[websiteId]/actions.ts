@@ -110,20 +110,25 @@ export async function triggerScan(websiteId: string): Promise<void> {
     standards: website.standards,
   };
 
-  // Try Inngest first. In development without the Inngest dev server running
-  // this will throw or silently drop the event — the `after()` block below
-  // catches that case and runs the scan directly in the Next.js process.
-  try {
+  const isDev = process.env.NODE_ENV !== "production";
+
+  // In production, Inngest Cloud routes the event to the Fly.io scanner
+  // worker — that's the only path.
+  //
+  // In dev we skip Inngest entirely and run the scan in-process via
+  // `after()`. We used to send the event and fall back only if the event
+  // didn't start within 3s, but the Inngest dev server intermittently
+  // accepts the event, marks the function RUNNING, and then hangs for the
+  // full step timeout (~10 min) per retry — leaving the UI spinning with
+  // no way to recover. In-process execution is the same code path as
+  // `/api/demo-scan` (which is reliable) and avoids the step-replay
+  // machinery entirely. The Inngest dev CLI / `pnpm inngest:dev` is no
+  // longer required for local scans.
+  if (!isDev) {
     await inngest.send({ name: "scan/website.requested", data: eventData });
-  } catch {
-    // Inngest unavailable — dev fallback below will handle it
   }
 
-  // Dev-only fallback: if Inngest didn't pick up the event within 3 seconds,
-  // run the scan directly inside the Next.js process. This lets `pnpm dev`
-  // work end-to-end without also running `pnpm inngest:dev`.
-  // In production INNGEST_EVENT_KEY is always set and Inngest is the only path.
-  if (process.env.NODE_ENV !== "production") {
+  if (isDev) {
     const capturedScanId = scan.id;
     const capturedWebsiteId = websiteId;
     const capturedUrl = website.url;
@@ -131,16 +136,6 @@ export async function triggerScan(websiteId: string): Promise<void> {
     const capturedStandards = website.standards;
 
     after(async () => {
-      // Give Inngest 3 s to pick up the event before taking over
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-
-      const current = await db.scan.findUnique({
-        where: { id: capturedScanId },
-        select: { status: true },
-      });
-      // Inngest already processed it (RUNNING/COMPLETED/FAILED/CANCELLED)
-      if (current?.status !== "QUEUED") return;
-
       await runScanInProcess(
         capturedScanId,
         capturedWebsiteId,
@@ -165,11 +160,15 @@ async function runScanInProcess(
   pageLimit: number,
   standards: string[],
 ): Promise<void> {
-  // Mark as running
-  await db.scan.update({
-    where: { id: scanId },
+  // Atomically claim the scan: only transition QUEUED → RUNNING. If another
+  // process (or a prior after() callback after a hot-reload) already moved
+  // it out of QUEUED, we bail out silently — we're not going to duplicate
+  // work or overwrite a terminal state.
+  const claim = await db.scan.updateMany({
+    where: { id: scanId, status: "QUEUED" },
     data: { status: "RUNNING", startedAt: new Date() },
   });
+  if (claim.count === 0) return;
 
   try {
     const result = await runScan(websiteUrl, pageLimit, standards, { scanId });

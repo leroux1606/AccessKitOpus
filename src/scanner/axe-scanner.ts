@@ -28,6 +28,15 @@ export async function scanPageWithAxe(
   const page = await context.newPage();
   const startTime = Date.now();
 
+  // Auto-dismiss any JS dialogs (alert / confirm / prompt / beforeunload).
+  // Without this, Playwright blocks page.goto and subsequent calls until the
+  // dialog is handled — which hangs indefinitely on pages that fire alerts on
+  // load (e.g. deque's `?a=send_me_to_mars` demo links). Axe analyses the
+  // static DOM, so dismissing dialogs is semantically harmless.
+  page.on("dialog", (dialog) => {
+    dialog.dismiss().catch(() => {});
+  });
+
   // Cap total page weight so a malicious or accidentally huge response
   // cannot OOM the worker. Installed before navigation so every request
   // (HTML + JS + CSS + images) is intercepted.

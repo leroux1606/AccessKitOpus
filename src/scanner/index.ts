@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import type { ScanResult, ScanViolation } from "@/types/scan";
+import type { PageScanResult, ScanResult, ScanViolation } from "@/types/scan";
 import { crawlWebsite } from "./crawler";
 import { scanPageWithAxe } from "./axe-scanner";
 import { scanPageWithPa11y } from "./pa11y-scanner";
@@ -56,15 +56,39 @@ export async function runScan(
       }
     }
 
-    // 2. Scan each page with axe-core (max 3 concurrent to balance speed vs. memory)
+    // 2. Scan each page with axe-core (max 3 concurrent to balance speed vs. memory).
+    //    Per-page failures are non-fatal: one bad URL (e.g. a JS-driven anchor
+    //    that triggers chrome-error://) must not tank the whole scan — we
+    //    collect what we can and surface the failures in logs. The scan only
+    //    fails as a whole if every discovered page failed (see check below).
     const CONCURRENCY = 3;
-    const rawPages = [];
+    const rawPages: PageScanResult[] = [];
+    const pageFailures: { url: string; error: string }[] = [];
     for (let i = 0; i < urls.length; i += CONCURRENCY) {
       const batch = urls.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(
+      const settled = await Promise.allSettled(
         batch.map((url) => scanPageWithAxe(context, url, websiteOrigin, standards, scanId)),
       );
-      rawPages.push(...results);
+      settled.forEach((r, j) => {
+        const url = batch[j]!;
+        if (r.status === "fulfilled") {
+          rawPages.push(r.value);
+        } else {
+          const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          pageFailures.push({ url, error: msg });
+          console.warn(`[scanner] page scan failed for ${url}: ${msg.split("\n")[0]}`);
+        }
+      });
+    }
+
+    if (rawPages.length === 0) {
+      const sample = pageFailures
+        .slice(0, 3)
+        .map((f) => `${f.url}: ${f.error.split("\n")[0]}`)
+        .join("; ");
+      throw new Error(
+        `All ${urls.length} discovered page(s) failed to load. ${sample}`,
+      );
     }
 
     // 2b. Run pa11y for additional coverage. pa11y spawns its own headless

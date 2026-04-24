@@ -148,6 +148,12 @@ async function crawlFromHomepage(
   const discovered = new Set<string>();
 
   const page = await context.newPage();
+  // Auto-dismiss any dialogs (alert / confirm / prompt) so we never hang on
+  // a page that fires them during load. See the matching handler in
+  // `scanPageWithAxe` for the full rationale.
+  page.on("dialog", (dialog) => {
+    dialog.dismiss().catch(() => {});
+  });
   const cap = await applyPageResourceCap(page);
   try {
     await page.goto(websiteUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -156,11 +162,27 @@ async function crawlFromHomepage(
       links.map((a) => (a as HTMLAnchorElement).href),
     );
 
+    // Homepage-crawl dedup: keep the first URL we see for a given pathname and
+    // drop later query-string / hash variants. Many sites (and demo pages like
+    // Deque's Mars demo) put JS-driven handlers on anchors like
+    // `?a=send_me_to_mars` and `?a=ice_cream` that all resolve to the same
+    // HTML document. Scanning all of them wastes minutes per scan and
+    // frequently trips chrome-error:// navigation bails. Sitemap URLs skip
+    // this path entirely, so sites that legitimately serve distinct content
+    // per query string (`/product?id=1` etc.) are unaffected.
+    const seenPaths = new Set<string>();
     for (const href of hrefs) {
       const normalized = normalizeUrl(href, origin);
-      if (normalized && !visited.has(normalized)) {
-        discovered.add(normalized);
+      if (!normalized || visited.has(normalized)) continue;
+      let pathKey: string;
+      try {
+        pathKey = new URL(normalized).pathname;
+      } catch {
+        continue;
       }
+      if (seenPaths.has(pathKey)) continue;
+      seenPaths.add(pathKey);
+      discovered.add(normalized);
     }
   } catch {
     // If homepage fails, at least scan the homepage itself
