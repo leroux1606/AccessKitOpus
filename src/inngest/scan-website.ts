@@ -101,6 +101,9 @@ export const scanWebsiteJob = inngest.createFunction(
               violationCount: pageResult.violations.length,
               loadTime: pageResult.loadTime,
               screenshotUrl: pageResult.screenshotUrl ?? null,
+              status: pageResult.status,
+              statusCode: pageResult.statusCode ?? null,
+              errorMessage: pageResult.errorMessage ?? null,
             },
           });
 

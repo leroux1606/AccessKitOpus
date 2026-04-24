@@ -43,13 +43,55 @@ export async function scanPageWithAxe(
   const cap = await applyPageResourceCap(page);
 
   try {
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 }).catch(() =>
-      // Fall back to domcontentloaded if networkidle times out (SPAs)
-      page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 }),
-    );
+    // Capture the main navigation response so we can short-circuit on
+    // 4xx/5xx. Without this, axe happily scans the site's 404 page
+    // (typically empty) and the page gets credited as a perfect 100.
+    let response = await page
+      .goto(url, { waitUntil: "networkidle", timeout: 30000 })
+      .catch(() => null);
+    if (!response) {
+      // Fall back to domcontentloaded if networkidle times out (SPAs).
+      response = await page
+        .goto(url, { waitUntil: "domcontentloaded", timeout: 15000 })
+        .catch(() => null);
+    }
 
     const title = await page.title().catch(() => url);
     const loadTime = Date.now() - startTime;
+    const statusCode = response?.status() ?? null;
+
+    // Non-OK HTTP → mark the page UNREACHABLE and skip axe entirely.
+    // Scanning a 404/500 page is meaningless; worse, the resulting
+    // 0 violations would inflate the site's average to "perfect".
+    if (statusCode !== null && statusCode >= 400) {
+      return {
+        url,
+        title,
+        loadTime,
+        violations: [],
+        score: null,
+        status: "UNREACHABLE",
+        statusCode,
+        errorMessage: `Server returned HTTP ${statusCode}`,
+        screenshotUrl: null,
+      };
+    }
+
+    // Navigation itself failed (DNS, connection reset, crash). No
+    // response object → no status code to check.
+    if (!response) {
+      return {
+        url,
+        title: url,
+        loadTime,
+        violations: [],
+        score: null,
+        status: "ERROR",
+        statusCode: null,
+        errorMessage: "Page failed to load",
+        screenshotUrl: null,
+      };
+    }
 
     const axeTags = standardsToAxeTags(standards);
 
@@ -115,7 +157,17 @@ export async function scanPageWithAxe(
       }
     }
 
-    return { url, title, loadTime, violations, score: 0, screenshotUrl };
+    return {
+      url,
+      title,
+      loadTime,
+      violations,
+      score: 0, // real score is filled in by addPageScores()
+      status: "OK",
+      statusCode,
+      errorMessage: null,
+      screenshotUrl,
+    };
   } finally {
     await cap.dispose();
     await page.close();

@@ -91,6 +91,22 @@ export async function runScan(
       );
     }
 
+    // Every page result with status != OK (UNREACHABLE / ERROR) was returned
+    // explicitly by the scanner — they're captured for reporting but do not
+    // contribute violations or score. If *every* returned page is a failure,
+    // fail the whole scan so the user isn't told "0 issues, score 100" when
+    // in fact nothing was actually scanned.
+    const scannablePages = rawPages.filter((p) => p.status === "OK");
+    if (scannablePages.length === 0) {
+      const sample = rawPages
+        .slice(0, 3)
+        .map((p) => `${p.url}: ${p.errorMessage ?? p.status}`)
+        .join("; ");
+      throw new Error(
+        `No pages could be scanned (all ${rawPages.length} returned errors). ${sample}`,
+      );
+    }
+
     // 2b. Run pa11y for additional coverage. pa11y spawns its own headless
     // Chromium via puppeteer, so each parallel call adds ~300 MB of RSS on
     // top of the Playwright browser we already have open. That doubling
@@ -100,7 +116,10 @@ export async function runScan(
     //      is bounded to one extra Chromium at a time.
     //   3. Cap the number of URLs at 3 (down from 5).
     if (process.env.SCANNER_ENABLE_PA11Y === "true") {
-      const pa11yUrls = urls.slice(0, Math.min(urls.length, 3));
+      // Only run pa11y against pages that loaded successfully — no point
+      // burning a second Chromium on a 404 page.
+      const okUrls = scannablePages.map((p) => p.url);
+      const pa11yUrls = okUrls.slice(0, Math.min(okUrls.length, 3));
       for (const url of pa11yUrls) {
         try {
           const pa11yPage = await scanPageWithPa11y(url, websiteOrigin);

@@ -19,12 +19,17 @@ const makeViolation = (
   fingerprint: "abc123",
 });
 
-const makePage = (violations: ReturnType<typeof makeViolation>[]): PageScanResult => ({
+const makePage = (
+  violations: ReturnType<typeof makeViolation>[],
+  overrides: Partial<PageScanResult> = {},
+): PageScanResult => ({
   url: "https://example.com",
   title: "Home",
   loadTime: 100,
   score: 0,
+  status: "OK",
   violations,
+  ...overrides,
 });
 
 // ─── calculateScore ───────────────────────────────────────────────────────────
@@ -99,5 +104,14 @@ describe("addPageScores", () => {
     ];
     const results = addPageScores(pages);
     expect(results.map((p) => p.score)).toEqual([90, 100, 96]);
+  });
+
+  it("returns null score for unreachable / errored pages so they don't inflate the average", () => {
+    const pages = [
+      makePage([], { status: "UNREACHABLE", statusCode: 404 }),
+      makePage([], { status: "ERROR", errorMessage: "DNS failed" }),
+    ];
+    const results = addPageScores(pages);
+    expect(results.map((p) => p.score)).toEqual([null, null]);
   });
 });

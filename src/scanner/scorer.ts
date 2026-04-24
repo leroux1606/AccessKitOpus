@@ -16,6 +16,11 @@ export function calculateScore(
 
 export function addPageScores(pages: PageScanResult[]): PageScanResult[] {
   return pages.map((page) => {
+    // Unreachable / errored pages cannot be scored. Leaving score as null
+    // prevents them from being averaged into the site score as "perfect".
+    if (page.status !== "OK") {
+      return { ...page, score: null };
+    }
     let critical = 0, serious = 0, moderate = 0, minor = 0;
     for (const v of page.violations) {
       if (v.severity === "CRITICAL") critical++;

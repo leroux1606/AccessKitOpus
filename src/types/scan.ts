@@ -1,5 +1,13 @@
 import type { Category, EffortLevel, Engine, Severity } from "@prisma/client";
 
+/**
+ * Load status of a scanned page. Mirrors the `PageStatus` enum in
+ * `schema.prisma` — declared locally as a string union so type-checking
+ * still passes when `prisma generate` has not yet been re-run after a
+ * schema change. The string values must stay in sync with the enum.
+ */
+export type PageStatus = "OK" | "UNREACHABLE" | "ERROR";
+
 export type ScanViolation = {
   ruleId: string;
   engine: Engine;
@@ -25,7 +33,22 @@ export type PageScanResult = {
   title: string;
   loadTime: number;
   violations: ScanViolation[];
-  score: number;
+  /**
+   * 0-100 accessibility score. `null` when the page could not be evaluated
+   * (unreachable / navigation error) — those pages are excluded from the
+   * site-wide score so a broken page does not get credited as "perfect".
+   */
+  score: number | null;
+  /**
+   * Load status of the page itself. `OK` = page loaded with 2xx/3xx.
+   * `UNREACHABLE` = server returned 4xx/5xx. `ERROR` = navigation failed
+   * (DNS, timeout, crash). Only `OK` pages are scanned by axe and scored.
+   */
+  status: PageStatus;
+  /** HTTP status code observed on the main navigation response, if any. */
+  statusCode?: number | null;
+  /** Human-readable error message for non-OK pages. */
+  errorMessage?: string | null;
   /**
    * Public URL of the page screenshot uploaded to Cloudflare R2, or
    * `null` / `undefined` when screenshots are disabled (no R2 config,

@@ -300,15 +300,24 @@ model Page {
   url            String
   title          String?
   score          Int?
-  violationCount Int      @default(0)
+  violationCount Int        @default(0)
   screenshotUrl  String?
-  loadTime       Int?     // milliseconds
-  createdAt      DateTime @default(now())
+  loadTime       Int?       // milliseconds
+  status         PageStatus @default(OK)
+  statusCode     Int?       // HTTP status captured on load (null if navigation failed)
+  errorMessage   String?
+  createdAt      DateTime   @default(now())
 
   scan       Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade)
   violations Violation[]
 
   @@index([scanId])
+}
+
+enum PageStatus {
+  OK
+  UNREACHABLE   // HTTP 4xx/5xx — page loaded but server signaled error
+  ERROR         // navigation failed entirely (DNS, timeout, crash)
 }
 
 // ─── Violations ───────────────────────────────────────────────────────────────

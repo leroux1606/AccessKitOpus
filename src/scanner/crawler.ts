@@ -98,10 +98,30 @@ export function isAllowedByRobots(robotsTxt: string, path: string): boolean {
   return best ? best.allow : true;
 }
 
+/**
+ * Returns true if the pathname contains two or more consecutive identical
+ * non-empty segments (e.g. `/demo/demo/mars`, `/a/a/b`). This pattern is
+ * almost always produced by a target page using poorly-formed relative
+ * hrefs — a link like `<a href="demo/mars">` on a page already at
+ * `/demo/mars` resolves to `/demo/demo/mars`, which the server doesn't
+ * serve. Discovering and scanning such URLs just produces noise (404s
+ * presented as "perfect" before the scoring fix, or polluting the page
+ * list after). Rare real paths like `/docs/docs/intro` are accepted via
+ * sitemap.xml, which bypasses this heuristic.
+ */
+export function hasDuplicateConsecutiveSegments(pathname: string): boolean {
+  const segments = pathname.split("/").filter(Boolean);
+  for (let i = 1; i < segments.length; i++) {
+    if (segments[i] === segments[i - 1]) return true;
+  }
+  return false;
+}
+
 export function normalizeUrl(url: string, origin: string): string | null {
   try {
     const parsed = new URL(url, origin);
     if (parsed.origin !== origin) return null; // external link
+    if (hasDuplicateConsecutiveSegments(parsed.pathname)) return null;
     parsed.hash = ""; // remove fragments
     // Remove trailing slash except for root
     const href = parsed.pathname !== "/"

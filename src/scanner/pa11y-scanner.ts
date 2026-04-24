@@ -108,6 +108,9 @@ export async function scanPageWithPa11y(
       violations,
       score: 100, // Placeholder — real score comes from combined results
       loadTime: 0,
+      status: "OK",
+      statusCode: null,
+      errorMessage: null,
     };
   } catch (err) {
     // If pa11y fails, return empty results rather than crashing the scan
@@ -118,6 +121,9 @@ export async function scanPageWithPa11y(
       violations: [],
       score: 100,
       loadTime: 0,
+      status: "OK",
+      statusCode: null,
+      errorMessage: null,
     };
   }
 }

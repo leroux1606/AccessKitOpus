@@ -14,6 +14,38 @@ interface ScanDetailPageProps {
   params: Promise<{ websiteId: string; scanId: string }>;
 }
 
+/**
+ * Collapse violations that are the exact same problem repeated in the DOM.
+ * Axe-core reports one result per matching node, so a logo link that appears
+ * five times in a header produces five identical entries. Listing all five
+ * bloats the report and obscures the signal — one fix to the template
+ * resolves every copy. We keep the first occurrence as the representative
+ * and tally the rest.
+ */
+function groupIdenticalViolations<
+  V extends { id: string; ruleId: string; htmlElement: string | null }
+>(violations: V[]): { rep: V; count: number }[] {
+  const groups = new Map<string, { rep: V; count: number }>();
+  for (const v of violations) {
+    const key = `${v.ruleId}::${v.htmlElement ?? ""}`;
+    const existing = groups.get(key);
+    if (existing) existing.count++;
+    else groups.set(key, { rep: v, count: 1 });
+  }
+  return Array.from(groups.values());
+}
+
+function countSeveritiesInPage<V extends { severity: string }>(violations: V[]) {
+  const counts = { critical: 0, serious: 0, moderate: 0, minor: 0 };
+  for (const v of violations) {
+    if (v.severity === "CRITICAL") counts.critical++;
+    else if (v.severity === "SERIOUS") counts.serious++;
+    else if (v.severity === "MODERATE") counts.moderate++;
+    else if (v.severity === "MINOR") counts.minor++;
+  }
+  return counts;
+}
+
 export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
   const { websiteId, scanId } = await params;
   const session = await auth();
@@ -111,25 +143,46 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             ))}
           </div>
 
-          <div className="flex gap-4 text-sm text-muted-foreground">
-            <span>{scan.pagesScanned} page{scan.pagesScanned !== 1 ? "s" : ""} scanned</span>
-            {scan.duration && (
-              <span>Duration: {(scan.duration / 1000).toFixed(1)}s</span>
-            )}
-            <span>Total issues: {scan.totalViolations ?? 0}</span>
-          </div>
+          {(() => {
+            const unreachable = scan.pages.filter((p) => p.status !== "OK").length;
+            const scanned = scan.pages.length - unreachable;
+            return (
+              <div className="flex gap-4 text-sm text-muted-foreground flex-wrap">
+                <span>
+                  {scanned} of {scan.pages.length} page{scan.pages.length !== 1 ? "s" : ""} scanned
+                  {unreachable > 0 && ` · ${unreachable} unreachable`}
+                </span>
+                {scan.duration && (
+                  <span>Duration: {(scan.duration / 1000).toFixed(1)}s</span>
+                )}
+                <span>Total issues: {scan.totalViolations ?? 0}</span>
+              </div>
+            );
+          })()}
 
           {/* Page-by-page breakdown */}
           {scan.pages.length > 0 ? (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">Issues by page</h2>
-              {scan.pages.map((page) => (
-                <Card key={page.id}>
+              {scan.pages.map((page) => {
+                const perPageCounts = countSeveritiesInPage(page.violations);
+                const isError = page.status !== "OK";
+                return (
+                <Card key={page.id} className={isError ? "border-dashed opacity-70" : ""}>
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 flex-1">
-                        <CardTitle className="text-sm font-medium truncate">
+                        <CardTitle className="text-sm font-medium truncate flex items-center gap-2">
                           {page.title || page.url}
+                          {isError && (
+                            <Badge variant="destructive" className="flex-shrink-0">
+                              {page.status === "UNREACHABLE" && page.statusCode
+                                ? `HTTP ${page.statusCode}`
+                                : page.status === "UNREACHABLE"
+                                ? "Unreachable"
+                                : "Load error"}
+                            </Badge>
+                          )}
                         </CardTitle>
                         <a
                           href={page.url}
@@ -139,21 +192,58 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
                         >
                           {page.url}
                         </a>
+                        {isError && page.errorMessage && (
+                          <p className="text-xs text-destructive mt-1">{page.errorMessage}</p>
+                        )}
+                        {!isError && (
+                          <div className="flex gap-2 flex-wrap mt-2">
+                            {perPageCounts.critical > 0 && (
+                              <Badge variant="critical">
+                                {perPageCounts.critical} critical
+                              </Badge>
+                            )}
+                            {perPageCounts.serious > 0 && (
+                              <Badge variant="serious">
+                                {perPageCounts.serious} serious
+                              </Badge>
+                            )}
+                            {perPageCounts.moderate > 0 && (
+                              <Badge variant="moderate">
+                                {perPageCounts.moderate} moderate
+                              </Badge>
+                            )}
+                            {perPageCounts.minor > 0 && (
+                              <Badge variant="minor">
+                                {perPageCounts.minor} minor
+                              </Badge>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className={`font-bold ${scoreToColor(page.score)}`}>
-                          {page.score ?? "—"}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {page.violationCount} issue{page.violationCount !== 1 ? "s" : ""}
-                        </span>
+                      <div className="flex flex-col items-end flex-shrink-0 min-w-[72px]">
+                        {isError ? (
+                          <span className="text-xs text-muted-foreground">Not scored</span>
+                        ) : (
+                          <>
+                            <span
+                              className={`text-xl font-bold leading-none ${scoreToColor(page.score)}`}
+                              aria-label={`Page score: ${page.score ?? "—"} out of 100`}
+                            >
+                              {page.score ?? "—"}
+                              <span className="text-xs text-muted-foreground font-normal">/100</span>
+                            </span>
+                            <span className="text-xs text-muted-foreground mt-1">
+                              {page.violationCount} issue{page.violationCount !== 1 ? "s" : ""}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </CardHeader>
                   {page.violations.length > 0 && (
                     <CardContent className="p-0">
                       <ul role="list" className="divide-y border-t">
-                        {page.violations.map((v) => (
+                        {groupIdenticalViolations(page.violations).map(({ rep: v, count }) => (
                           <li key={v.id} className="px-6 py-4 space-y-2">
                             <div className="flex items-start gap-3">
                               <Badge
@@ -171,11 +261,23 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
                                 {v.severity.toLowerCase()}
                               </Badge>
                               <div className="min-w-0 flex-1 space-y-1">
-                                <p className="text-sm font-medium">{v.description}</p>
+                                <div className="flex items-start gap-2 flex-wrap">
+                                  <p className="text-sm font-medium">{v.description}</p>
+                                  {count > 1 && (
+                                    <Badge variant="secondary" className="flex-shrink-0">
+                                      × {count}
+                                    </Badge>
+                                  )}
+                                </div>
                                 <p className="text-xs text-muted-foreground">{v.helpText}</p>
                                 {v.wcagCriterion && (
                                   <p className="text-xs text-muted-foreground">
                                     WCAG {v.wcagCriterion} (Level {v.wcagLevel})
+                                  </p>
+                                )}
+                                {count > 1 && (
+                                  <p className="text-xs text-muted-foreground">
+                                    Found in {count} places on this page — one fix to the shared markup resolves all of them.
                                   </p>
                                 )}
                               </div>
@@ -185,7 +287,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
                               <code>{v.htmlElement}</code>
                             </pre>
                             {/* Fix suggestion */}
-                            {v.fixSuggestion && (
+                            {v.fixSuggestion ? (
                               <details className="group">
                                 <summary className="text-xs font-medium text-primary cursor-pointer hover:underline">
                                   How to fix
@@ -194,6 +296,12 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
                                   {v.fixSuggestion}
                                 </pre>
                               </details>
+                            ) : (
+                              v.helpText && (
+                                <p className="text-xs text-muted-foreground italic">
+                                  No curated fix for this rule yet — see the rule documentation below.
+                                </p>
+                              )
                             )}
                             {v.helpUrl && (
                               <a
@@ -211,7 +319,8 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
                     </CardContent>
                   )}
                 </Card>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <Card>

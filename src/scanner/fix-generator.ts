@@ -357,6 +357,110 @@ Check your HTML for repeated id values and rename them to be unique.`,
     fix: `Elements referenced by aria-labelledby, aria-describedby, or aria-controls must have unique IDs.`,
     effort: "LOW",
   },
+  "target-size": {
+    fix: `Interactive controls must have a touch target of at least 24×24 CSS pixels (WCAG 2.5.8 Level AA). Either enlarge the control or leave enough spacing around it so adjacent targets don't overlap within a 24px radius.
+
+Before: <a href="/help">Help</a>  <!-- inline text link, 16px tall -->
+After:  <a href="/help" style="display:inline-block; padding:6px 10px">Help</a>
+
+Tip: increase padding on <a>, <button>, and form <input> elements in navigation and footer lists — that's where this rule most commonly fires.`,
+    effort: "LOW",
+  },
+  "aria-prohibited-attr": {
+    fix: `Remove ARIA attributes that are not permitted on this element's role. ARIA attributes have strict rules about which roles can use them.
+
+Example: aria-label on a <div> without a role is prohibited — add role="region" (or similar) or move the label to a semantic element.
+Example: aria-checked on role="button" is prohibited — use aria-pressed instead.
+
+See https://www.w3.org/TR/wai-aria/ for per-role allowed attributes.`,
+    effort: "LOW",
+  },
+  "aria-input-field-name": {
+    fix: `Custom input fields (role="textbox", "combobox", "searchbox", etc.) must have an accessible name via aria-label, aria-labelledby, or an associated <label>.
+
+Before: <div role="textbox" contenteditable="true"></div>
+After:  <div role="textbox" contenteditable="true" aria-label="Message body"></div>`,
+    effort: "LOW",
+  },
+  "aria-command-name": {
+    fix: `Elements with role="button", "link", or "menuitem" must have an accessible name.
+
+Before: <div role="button" onclick="..."></div>
+After:  <div role="button" aria-label="Close" onclick="..."></div>
+Better: use a real <button> instead of a custom role.`,
+    effort: "LOW",
+  },
+  "aria-toggle-field-name": {
+    fix: `Toggle controls (role="checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio") must have an accessible name.
+
+Before: <div role="switch" aria-checked="false"></div>
+After:  <div role="switch" aria-checked="false" aria-label="Notifications"></div>`,
+    effort: "LOW",
+  },
+  "aria-tooltip-name": {
+    fix: `Elements with role="tooltip" must have an accessible name (their text content or aria-label).
+
+Before: <div role="tooltip" id="tip-1"></div>
+After:  <div role="tooltip" id="tip-1">Saves the current document.</div>`,
+    effort: "LOW",
+  },
+  "empty-heading": {
+    fix: `Headings must contain text so they convey the section's purpose. Remove empty headings or add content.
+
+Before: <h2></h2>
+After:  <h2>Your recent scans</h2>
+Or remove the heading entirely if it has no purpose.`,
+    effort: "LOW",
+  },
+  "empty-table-header": {
+    fix: `Table header cells (<th>) must not be empty. Describe the column or row they head.
+
+Before: <th></th>
+After:  <th scope="col">Date</th>`,
+    effort: "LOW",
+  },
+  "svg-img-alt": {
+    fix: `Meaningful inline <svg> elements used as images need an accessible name.
+
+Before: <svg>...</svg>
+After:  <svg role="img" aria-label="Download report"><title>Download report</title>...</svg>
+Decorative: <svg aria-hidden="true">...</svg>`,
+    effort: "LOW",
+  },
+  "role-img-alt": {
+    fix: `Elements with role="img" must have an accessible name via aria-label or aria-labelledby.
+
+Before: <div role="img" style="background-image: url(avatar.jpg)"></div>
+After:  <div role="img" aria-label="Portrait of the author" style="background-image: url(avatar.jpg)"></div>`,
+    effort: "LOW",
+  },
+  "area-alt": {
+    fix: `Every <area> in an image map must have an alt attribute describing its destination.
+
+Before: <area shape="rect" coords="0,0,100,100" href="/home">
+After:  <area shape="rect" coords="0,0,100,100" href="/home" alt="Go to home page">`,
+    effort: "LOW",
+  },
+  "nested-interactive": {
+    fix: `Do not nest interactive elements inside each other. A <button> cannot contain a <a>, a <a> cannot contain an <input>, etc.
+
+Before: <a href="/x"><button>Go</button></a>
+After:  <a href="/x" class="btn">Go</a>  <!-- style the link as a button -->`,
+    effort: "MEDIUM",
+  },
+  "presentation-role-conflict": {
+    fix: `role="presentation" or role="none" is ignored on elements that have global ARIA attributes, are focusable, or have semantic meaning.
+
+Before: <button role="presentation">Click</button>
+After:  Either remove the role, or remove the attributes/behaviours that conflict with it.`,
+    effort: "LOW",
+  },
+  "bypass": {
+    fix: `Provide a way for keyboard users to skip repeated navigation blocks — typically a "Skip to main content" link as the first focusable element on the page.
+
+See the "skip-link" rule for the full snippet.`,
+    effort: "LOW",
+  },
 };
 
 export function generateFixSuggestion(ruleId: string): string | undefined {

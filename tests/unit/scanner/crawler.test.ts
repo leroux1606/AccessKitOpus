@@ -141,4 +141,23 @@ describe("normalizeUrl", () => {
       "https://example.com/search?q=test",
     );
   });
+
+  // Repro for the scanoutput.txt bug: target pages with sloppy relative hrefs
+  // (e.g. an <a href="demo/mars"> on a page already at /demo/mars) cause the
+  // browser to produce URLs like /demo/demo/mars. The server 404s those, and
+  // they pollute the scan with unreachable-but-previously-"score 100" pages.
+  it("returns null for URLs whose path contains consecutive duplicate segments", () => {
+    expect(normalizeUrl("https://example.com/demo/demo/mars", origin)).toBeNull();
+    expect(normalizeUrl("https://example.com/a/a/b", origin)).toBeNull();
+    expect(
+      normalizeUrl("https://example.com/foo/bar/bar/baz", origin),
+    ).toBeNull();
+  });
+
+  it("accepts similar-but-non-adjacent path segments", () => {
+    // /docs/api/docs is legitimate (no adjacent duplicate), must pass through.
+    expect(normalizeUrl("https://example.com/docs/api/docs", origin)).toBe(
+      "https://example.com/docs/api/docs",
+    );
+  });
 });
