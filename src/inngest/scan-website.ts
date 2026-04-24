@@ -104,12 +104,15 @@ export const scanWebsiteJob = inngest.createFunction(
             },
           });
 
-          for (const v of pageResult.violations) {
-            // Carry forward firstDetectedAt and workflow state from previous scan
-            const existing = existingByFingerprint.get(v.fingerprint);
+          if (pageResult.violations.length === 0) continue;
 
-            await tx.violation.create({
-              data: {
+          // Batch all violations for this page in one round-trip. Serial
+          // `create()` calls inside the transaction were exceeding Prisma's
+          // default 5s window on larger scans, causing "Transaction not found".
+          await tx.violation.createMany({
+            data: pageResult.violations.map((v) => {
+              const existing = existingByFingerprint.get(v.fingerprint);
+              return {
                 scanId,
                 pageId: page.id,
                 websiteId,
@@ -133,9 +136,9 @@ export const scanWebsiteJob = inngest.createFunction(
                 firstDetectedAt: existing?.firstDetectedAt ?? now,
                 status: existing?.status ?? "OPEN",
                 assignedToId: existing?.assignedToId ?? null,
-              },
-            });
-          }
+              };
+            }),
+          });
         }
 
         await tx.scan.update({
@@ -181,6 +184,12 @@ export const scanWebsiteJob = inngest.createFunction(
             resolvedAt: now,
           },
         });
+      }, {
+        // Large scans (many pages × many violations) can easily exceed the
+        // 5s default. Give the transaction real headroom so it doesn't get
+        // closed out mid-write.
+        maxWait: 10_000,
+        timeout: 120_000,
       });
     });
 

@@ -83,15 +83,18 @@ export async function triggerScan(websiteId: string): Promise<void> {
     redirect(`/websites/${websiteId}/scans/${runningScan.id}`);
   }
 
-  // DB-backed rate limit: max 10 scans per website per 24 hours
-  const scansToday = await db.scan.count({
-    where: {
-      websiteId,
-      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-    },
-  });
-  if (scansToday >= 10) {
-    throw new Error("Daily scan limit reached (10 scans per website per day). Try again tomorrow.");
+  // DB-backed rate limit: max 10 scans per website per 24 hours.
+  // Skipped in dev so repeated local testing isn't blocked by a prod safeguard.
+  if (process.env.NODE_ENV === "production") {
+    const scansToday = await db.scan.count({
+      where: {
+        websiteId,
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+    });
+    if (scansToday >= 10) {
+      throw new Error("Daily scan limit reached (10 scans per website per day). Try again tomorrow.");
+    }
   }
 
   const limits = getPlanLimits(membership.organization.plan);
@@ -200,10 +203,15 @@ async function runScanInProcess(
           },
         });
 
-        for (const v of pageResult.violations) {
-          const prev = existingByFp.get(v.fingerprint);
-          await tx.violation.create({
-            data: {
+        if (pageResult.violations.length === 0) continue;
+
+        // Batch inserts: per-violation create() inside the interactive
+        // transaction was blowing past Prisma's 5s default and the server
+        // was closing the txn out from under us ("Transaction not found").
+        await tx.violation.createMany({
+          data: pageResult.violations.map((v) => {
+            const prev = existingByFp.get(v.fingerprint);
+            return {
               scanId,
               pageId: page.id,
               websiteId,
@@ -227,9 +235,9 @@ async function runScanInProcess(
               firstDetectedAt: prev?.firstDetectedAt ?? now,
               status: prev?.status ?? "OPEN",
               assignedToId: prev?.assignedToId ?? null,
-            },
-          });
-        }
+            };
+          }),
+        });
       }
 
       await tx.scan.update({
@@ -252,6 +260,9 @@ async function runScanInProcess(
         where: { id: websiteId },
         data: { currentScore: result.score, lastScanAt: now },
       });
+    }, {
+      maxWait: 10_000,
+      timeout: 120_000,
     });
   } catch (err) {
     await db.scan.update({
