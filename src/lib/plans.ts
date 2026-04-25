@@ -31,7 +31,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   STARTER: {
     websites: 3,
     pagesPerScan: 50,
-    teamSeats: 1,
+    teamSeats: 2,
     scanFrequencies: ["MANUAL", "MONTHLY"],
     hasWhiteLabel: false,
     hasClientPortal: false,

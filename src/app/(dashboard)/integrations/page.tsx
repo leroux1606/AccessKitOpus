@@ -26,12 +26,25 @@ export default async function IntegrationsPage() {
       icon: Github,
       title: "GitHub Actions",
       description: "Scan staging URLs on every pull request. Block merges if new critical issues are introduced.",
-      available: hasCI,
-      requiredPlan: "Professional",
-      href: hasCI ? null : "/settings/billing",
-      cta: hasCI ? "Coming soon" : "Upgrade to Professional",
-      code: hasCI
-        ? '- name: AccessKit scan\n  run: |\n    curl -s -X POST \\\n      -H "Authorization: Bearer ${{ secrets.ACCESSKIT_KEY }}" \\\n      -d \'{"websiteId":"YOUR_ID"}\' \\\n      https://app.accesskit.io/api/v1/scans'
+      available: hasApi,
+      requiredPlan: "Agency",
+      href: hasApi ? "/docs#cicd" : "/settings/billing",
+      cta: hasApi ? "View setup guide" : "Upgrade to Agency",
+      code: hasApi
+        ? `# .github/workflows/accessibility.yml
+name: Accessibility check
+on: [pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger AccessKit scan
+        run: |
+          curl -fsS -X POST \\
+            -H "Authorization: Bearer \${{ secrets.ACCESSKIT_API_KEY }}" \\
+            -H "Content-Type: application/json" \\
+            -d '{"websiteId":"YOUR_WEBSITE_ID"}' \\
+            https://app.accesskit.io/api/v1/scans`
         : null,
     },
     {

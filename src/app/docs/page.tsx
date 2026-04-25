@@ -255,7 +255,7 @@ export default function DocsPage() {
       -H "Authorization: Bearer \${{ secrets.ACCESSKIT_API_KEY }}" \\
       "https://app.accesskit.io/api/v1/issues?websiteId=your-website-id&severity=CRITICAL&status=OPEN")
 
-    COUNT=$(echo "$ISSUES" | jq '.issues | length')
+    COUNT=$(echo "$ISSUES" | jq '.data | length')
     if [ "$COUNT" -gt "0" ]; then
       echo "::error::$COUNT critical accessibility issues found"
       exit 1
